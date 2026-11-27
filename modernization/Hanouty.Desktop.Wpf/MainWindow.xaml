@@ -160,6 +160,34 @@
                                 Visibility="{Binding HasBarcodeAmbiguity, Converter={StaticResource BoolVisibility}}"
                                 MinHeight="44" Margin="0,4,0,8" Padding="12,8"
                                 AutomationProperties.Name="Choose barcode variant" IsEnabled="{Binding CanSelectProduct}"/>
+                        <GroupBox Header="Fiche article" Margin="0,4,0,8" Padding="6" DataContext="{Binding SelectedProduct}">
+                            <GroupBox.Style>
+                                <Style TargetType="GroupBox">
+                                    <Setter Property="Visibility" Value="Visible"/>
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding}" Value="{x:Null}">
+                                            <Setter Property="Visibility" Value="Collapsed"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </GroupBox.Style>
+                            <UniformGrid Columns="2">
+                                <TextBlock Text="Prix d'achat :"/>
+                                <TextBlock Text="{Binding PurchasePrice, StringFormat={}{0:F2} MAD}" FontWeight="SemiBold"/>
+                                <TextBlock Text="Unité :"/>
+                                <TextBlock Text="{Binding Unit}" FontWeight="SemiBold"/>
+                                <TextBlock Text="Fournisseur :"/>
+                                <TextBlock Text="{Binding SupplierId}" FontWeight="SemiBold"/>
+                                <TextBlock Text="Réf. fournisseur :"/>
+                                <TextBlock Text="{Binding SupplierReference}" FontWeight="SemiBold"/>
+                                <TextBlock Text="Alerte stock :"/>
+                                <TextBlock Text="{Binding StockAlert}" FontWeight="SemiBold"/>
+                                <TextBlock Text="Stock actuel :"/>
+                                <TextBlock Text="{Binding Stock}" FontWeight="SemiBold"/>
+                                <TextBlock Text="Anti-rupture :"/>
+                                <CheckBox IsChecked="{Binding PreventOutOfStockSale}" IsEnabled="False"/>
+                            </UniformGrid>
+                        </GroupBox>
                     </StackPanel>
                     <TabControl>
                         <TabItem Header="Articles · toucher pour ajouter">

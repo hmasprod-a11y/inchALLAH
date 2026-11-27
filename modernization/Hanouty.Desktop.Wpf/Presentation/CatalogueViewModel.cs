@@ -4,7 +4,27 @@ using System.Runtime.CompilerServices;
 
 namespace Hanouty.Desktop.Wpf.Presentation;
 
-public sealed record ProductSummary(string Id, string Name, string Barcode, string? ImagePath = null, string Family = "", decimal? DisplayUnitPriceMad = null);
+public sealed record ProductSummary(
+    string Id,
+    string Name,
+    string Barcode,
+    string? ImagePath = null,
+    string Family = "",
+    decimal? DisplayUnitPriceMad = null,
+    decimal PurchasePrice = 0m,
+    decimal ReferencePurchasePrice = 0m,
+    decimal QuantityPrice = 0m,
+    decimal QuantityPriceMin = 0m,
+    string Unit = "",
+    string Color = "",
+    string Size = "",
+    string SupplierId = "",
+    string SupplierReference = "",
+    decimal StockAlert = 0m,
+    string StockMode = "",
+    bool PreventOutOfStockSale = false,
+    decimal Stock = 0m
+);
 
 // Read-only projection of the EXISTING Host basket, never a WPF-owned basket.
 // The production composition root must implement this using its active cashier session.
@@ -335,6 +355,11 @@ public sealed class CatalogueViewModel : INotifyPropertyChanged
         if (_selectionInFlight) { ScanFeedback = "Selection already in progress"; return; }
         if (!CatalogueAvailable) { ScanFeedback = "Local catalogue unavailable"; return; }
         if (SelectedProduct is null) { ScanFeedback = "No product selected"; return; }
+        if (SelectedProduct.PreventOutOfStockSale && SelectedProduct.Stock <= 0m)
+        {
+            ScanFeedback = "Vente interdite : article en rupture de stock";
+            return;
+        }
         if (BarcodeCandidates.Count > 1 && !BarcodeCandidates.Any(p => ReferenceEquals(p, SelectedProduct)))
         {
             ScanFeedback = "Choose a matching barcode variant explicitly";
@@ -626,8 +651,35 @@ public sealed class CatalogueViewModel : INotifyPropertyChanged
             if (_selectionInFlight) return;
             _selectedProduct = value;
             OnPropertyChanged();
+            OnPropertyChanged(nameof(SelectedPurchasePrice));
+            OnPropertyChanged(nameof(SelectedReferencePurchasePrice));
+            OnPropertyChanged(nameof(SelectedQuantityPrice));
+            OnPropertyChanged(nameof(SelectedQuantityPriceMin));
+            OnPropertyChanged(nameof(SelectedUnit));
+            OnPropertyChanged(nameof(SelectedColor));
+            OnPropertyChanged(nameof(SelectedSize));
+            OnPropertyChanged(nameof(SelectedSupplierId));
+            OnPropertyChanged(nameof(SelectedSupplierReference));
+            OnPropertyChanged(nameof(SelectedStockAlert));
+            OnPropertyChanged(nameof(SelectedStockMode));
+            OnPropertyChanged(nameof(SelectedPreventOutOfStockSale));
+            OnPropertyChanged(nameof(SelectedStock));
         }
     }
+
+    public decimal SelectedPurchasePrice => _selectedProduct?.PurchasePrice ?? 0m;
+    public decimal SelectedReferencePurchasePrice => _selectedProduct?.ReferencePurchasePrice ?? 0m;
+    public decimal SelectedQuantityPrice => _selectedProduct?.QuantityPrice ?? 0m;
+    public decimal SelectedQuantityPriceMin => _selectedProduct?.QuantityPriceMin ?? 0m;
+    public string SelectedUnit => _selectedProduct?.Unit ?? "";
+    public string SelectedColor => _selectedProduct?.Color ?? "";
+    public string SelectedSize => _selectedProduct?.Size ?? "";
+    public string SelectedSupplierId => _selectedProduct?.SupplierId ?? "";
+    public string SelectedSupplierReference => _selectedProduct?.SupplierReference ?? "";
+    public decimal SelectedStockAlert => _selectedProduct?.StockAlert ?? 0m;
+    public string SelectedStockMode => _selectedProduct?.StockMode ?? "";
+    public bool SelectedPreventOutOfStockSale => _selectedProduct?.PreventOutOfStockSale ?? false;
+    public decimal SelectedStock => _selectedProduct?.Stock ?? 0m;
 
     private bool HasPhoto(ProductSummary product) => !string.IsNullOrWhiteSpace(product.ImagePath) && _images.Exists(product.ImagePath);
 
