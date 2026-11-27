@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Linq;
 
 namespace Hanouty.ArchitectureBridge;
@@ -11,6 +11,7 @@ public sealed class AuthorizedCheckoutCommitGate
 {
     private readonly IAuthorizedCheckoutPort _posting;
     private readonly ICheckoutOperationJournal _journal;
+    private readonly Func<HanoutyPermission, bool>? _permissionCheck;
     private string? _uncertainId;
     private bool _committing;
     private readonly object _sync = new();
@@ -20,12 +21,7 @@ public sealed class AuthorizedCheckoutCommitGate
         get { lock (_sync) return _uncertainId; }
     }
 
-    public AuthorizedCheckoutCommitGate(IAuthorizedCheckoutPort posting,
-        ICheckoutOperationJournal journal)
-    {
-        _posting = posting ?? throw new ArgumentNullException(nameof(posting));
-        _journal = journal ?? throw new ArgumentNullException(nameof(journal));
-    }
+    public AuthorizedCheckoutCommitGate(IAuthorizedCheckoutPort posting, ICheckoutOperationJournal journal, Func<HanoutyPermission, bool>? permissionCheck = null) { _posting = posting ?? throw new ArgumentNullException(nameof(posting)); _journal = journal ?? throw new ArgumentNullException(nameof(journal)); _permissionCheck = permissionCheck; }
 
     public FinancialCommitOutcome Commit(AuthorizedCheckoutRequest request)
     {
@@ -50,6 +46,12 @@ public sealed class AuthorizedCheckoutCommitGate
                     { Selections = Array.AsReadOnly(partial.Selections?.ToArray() ?? Array.Empty<CheckoutPartialReturnSelection>()) } : null
             };
             snapshot.Validate();
+            if (_permissionCheck is not null)
+            {
+                var requiredPermission = snapshot.PartialCashReturn is not null ? HanoutyPermission.ProcessReturn : HanoutyPermission.PosSell;
+                if (!_permissionCheck(requiredPermission))
+                    throw new UnauthorizedAccessException("Permission refusée pour l'opération de caisse.");
+            }
             CheckoutOperationOutcome prior;
             try { prior = _journal.Lookup(snapshot.OperationId); }
             catch
@@ -122,3 +124,5 @@ public sealed class AuthorizedCheckoutCommitGate
         }
     }
 }
+
+
