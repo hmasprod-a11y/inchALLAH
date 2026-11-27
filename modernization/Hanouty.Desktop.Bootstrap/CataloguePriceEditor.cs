@@ -1,4 +1,4 @@
-using System.Data;
+﻿using System.Data;
 using MySql.Data.MySqlClient;
 
 namespace Hanouty.Desktop.Bootstrap;
@@ -10,7 +10,7 @@ internal sealed class CataloguePriceEditor(string connectionString)
 
     internal sealed record ArticleChoice(string Id, string Name, string Barcode, decimal Amount)
     {
-        public string Label => $"{Name} · {Barcode} · {Amount:N2} MAD";
+        public string Label => $"{Name} Â· {Barcode} Â· {Amount:N2} MAD";
     }
     internal sealed record SearchResult(IReadOnlyList<ArticleChoice> Articles, bool HasMore);
 
@@ -20,7 +20,7 @@ internal sealed class CataloguePriceEditor(string connectionString)
     {
         if (string.IsNullOrWhiteSpace(query)) return new(Array.Empty<ArticleChoice>(), false);
         if (query.Length > 128 || query.Any(character => char.IsControl(character) || char.IsSurrogate(character)))
-            throw new ArgumentException("Recherche limitée à 128 caractères sans caractères de contrôle.");
+            throw new ArgumentException("Recherche limitÃ©e Ã  128 caractÃ¨res sans caractÃ¨res de contrÃ´le.");
         using var connection = Open();
         using var command = new MySqlCommand(
             "SELECT a.ID_ARTICLE,a.Article,a.Code,a.PRIX_V_1 FROM TABLE_ARTICLES a " +
@@ -36,10 +36,10 @@ internal sealed class CataloguePriceEditor(string connectionString)
         while (rows.Read())
         {
             if (rows.IsDBNull(0) || rows.IsDBNull(1) || rows.IsDBNull(3))
-                throw new InvalidOperationException("Fiche ou prix incomplet dans les résultats.");
+                throw new InvalidOperationException("Fiche ou prix incomplet dans les rÃ©sultats.");
             var amount = rows.GetDecimal(3);
             if (string.IsNullOrWhiteSpace(rows.GetString(0)) || amount < 0 || decimal.Round(amount, 2) != amount)
-                throw new InvalidOperationException("Identité ou prix invalide dans les résultats.");
+                throw new InvalidOperationException("IdentitÃ© ou prix invalide dans les rÃ©sultats.");
             found.Add(new(rows.GetString(0), rows.GetString(1), rows.IsDBNull(2) ? "" : rows.GetString(2), amount));
         }
         return new(found.Take(50).ToArray(), found.Count > 50);
@@ -65,7 +65,7 @@ internal sealed class CataloguePriceEditor(string connectionString)
             connection, transaction);
         command.Parameters.AddWithValue("@family", family);
         if (command.ExecuteScalar() is not string)
-            throw new InvalidOperationException("Cette famille n’est plus disponible. Rechargez le catalogue.");
+            throw new InvalidOperationException("Cette famille nâ€™est plus disponible. Rechargez le catalogue.");
     }
 
     internal sealed record ImportLine(string Name, string Barcode, string Family, decimal Cost, decimal Price, decimal Stock);
@@ -108,7 +108,7 @@ internal sealed class CataloguePriceEditor(string connectionString)
         if (string.IsNullOrWhiteSpace(name) || name.Length > 128 || barcode.Length > 128 ||
             family.Length > 128 || price < 0 || decimal.Round(price, 2) != price ||
             cost < 0 || decimal.Round(cost, 2) != cost || stock < 0 || decimal.Round(stock, 3) != stock)
-            throw new ArgumentException("Vérifiez le nom, le code, la famille, les prix et le stock.");
+            throw new ArgumentException("VÃ©rifiez le nom, le code, la famille, les prix et le stock.");
         RequireFamily(connection, transaction, family);
 
         long number;
@@ -128,7 +128,7 @@ internal sealed class CataloguePriceEditor(string connectionString)
             var parent = ReadCard(connection, transaction, variantOf, true);
             if (string.IsNullOrEmpty(parent.Barcode) || family != parent.Family || barcode != parent.Barcode ||
                 string.Equals(name, parent.Name, StringComparison.OrdinalIgnoreCase))
-                throw new InvalidOperationException("La variante doit partager le code-barres et la famille de l’article source, avec un nom distinct.");
+                throw new InvalidOperationException("La variante doit partager le code-barres et la famille de lâ€™article source, avec un nom distinct.");
         }
         using (var duplicate = new MySqlCommand(
             "SELECT COUNT(*) FROM TABLE_ARTICLES WHERE BINARY ID_ARTICLE=BINARY @id OR " +
@@ -139,7 +139,7 @@ internal sealed class CataloguePriceEditor(string connectionString)
             duplicate.Parameters.AddWithValue("@name", name);
             duplicate.Parameters.AddWithValue("@code", barcode);
             if (Convert.ToInt64(duplicate.ExecuteScalar()) != 0)
-                throw new InvalidOperationException("Identifiant ou code-barres déjà utilisé.");
+                throw new InvalidOperationException("Identifiant ou code-barres dÃ©jÃ  utilisÃ©.");
         }
 
         void Write(string sql, params (string Name, object Value)[] parameters)
@@ -147,7 +147,7 @@ internal sealed class CataloguePriceEditor(string connectionString)
             using var command = new MySqlCommand(sql, connection, transaction);
             foreach (var (key, value) in parameters) command.Parameters.AddWithValue(key, value);
             if (command.ExecuteNonQuery() != 1)
-                throw new InvalidOperationException("Création d’article non confirmée.");
+                throw new InvalidOperationException("CrÃ©ation dâ€™article non confirmÃ©e.");
         }
 
         var now = DateTime.Now;
@@ -158,7 +158,7 @@ internal sealed class CataloguePriceEditor(string connectionString)
             ("@price", price), ("@cost", cost), ("@stock", stock), ("@tax", imported ? 20m : 0m),
             ("@second", imported ? price : 0m), ("@date", now.Date));
         Write("INSERT INTO TABLE_MOUVEMENTS_STOCK (DATES,HEURE,LIBELLE,ID_ARTICLE,CODE_ARTICLE,ARTICLE,QUANTITE) " +
-            "VALUES (@date,@time,'Création d''article',@id,@code,@name,@stock)",
+            "VALUES (@date,@time,'CrÃ©ation d''article',@id,@code,@name,@stock)",
             ("@date", now.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture)),
             ("@time", now.ToString("HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture)),
             ("@id", id), ("@code", barcode), ("@name", name), ("@stock", stock));
@@ -166,7 +166,7 @@ internal sealed class CataloguePriceEditor(string connectionString)
         return id;
     }
 
-    internal sealed record CardDetails(string Description, string Reference, string Unit, string Location);
+    internal sealed record CardDetails(string Description, string Reference, string Unit, string Location, decimal PurchasePrice = 0m, decimal Price1 = 0m, decimal Price2 = 0m, decimal Price3 = 0m, decimal WholesalePrice = 0m, decimal WholesaleMinQty = 0m, decimal MinStock = 0m, decimal VatRate = 0m, decimal Promotion = 0m, string Group = "");
     internal sealed record Card(long RowId, string Id, string Name, string Barcode, string Family, CardDetails Details);
 
     internal Card ReadCard(string id)
@@ -179,20 +179,20 @@ internal sealed class CataloguePriceEditor(string connectionString)
     internal void UpdateCard(Card reviewed, string name, string barcode, string family, CardDetails details, string actor, string pin)
     {
         if (string.IsNullOrWhiteSpace(name) || name.Length > 128 || barcode.Length > 128 || family.Length > 128)
-            throw new ArgumentException("Vérifiez le nom, le code-barres et la famille.");
+            throw new ArgumentException("VÃ©rifiez le nom, le code-barres et la famille.");
         using var connection = Open();
         using var transaction = connection.BeginTransaction(IsolationLevel.Serializable);
         InventoryDocumentValidation.RequireTransactionalTables(connection, transaction, "TABLE_PASS", "TABLE_ARTICLES");
         Authorize(connection, transaction, actor, pin);
         if (ReadCard(connection, transaction, reviewed.Id, true) != reviewed)
-            throw new InvalidOperationException("La fiche a changé. Rechargez l’article.");
+            throw new InvalidOperationException("La fiche a changÃ©. Rechargez lâ€™article.");
         var updated = reviewed with { Name = name, Barcode = barcode, Family = family, Details = details };
         if (updated == reviewed) return;
         var hasLocation = HasLocation(connection, transaction);
         if (!hasLocation && details.Location.Length != 0)
-            throw new InvalidOperationException("L’emplacement n’est pas disponible dans ce schéma LOGICA.");
+            throw new InvalidOperationException("Lâ€™emplacement nâ€™est pas disponible dans ce schÃ©ma LOGICA.");
         if (new[] { details.Description, details.Reference, details.Unit, details.Location }.Any(value => value.Length > 255))
-            throw new ArgumentException("Les champs de la fiche sont limités à 255 caractères.");
+            throw new ArgumentException("Les champs de la fiche sont limitÃ©s Ã  255 caractÃ¨res.");
         if (family != reviewed.Family)
         {
             InventoryDocumentValidation.RequireTransactionalTables(connection, transaction, "TABLE_FAMILLES");
@@ -207,7 +207,7 @@ internal sealed class CataloguePriceEditor(string connectionString)
             duplicate.Parameters.AddWithValue("@code", barcode);
             duplicate.Parameters.AddWithValue("@row", reviewed.RowId);
             if (Convert.ToInt64(duplicate.ExecuteScalar()) != 0)
-                throw new InvalidOperationException("Ce code-barres est déjà utilisé.");
+                throw new InvalidOperationException("Ce code-barres est dÃ©jÃ  utilisÃ©.");
         }
 
         using var update = new MySqlCommand(
@@ -221,15 +221,26 @@ internal sealed class CataloguePriceEditor(string connectionString)
         update.Parameters.AddWithValue("@description", details.Description);
         update.Parameters.AddWithValue("@reference", details.Reference);
         update.Parameters.AddWithValue("@unit", details.Unit);
+        update.Parameters.AddWithValue("@pa", details.PurchasePrice);
+        update.Parameters.AddWithValue("@pv1", details.Price1);
+        update.Parameters.AddWithValue("@pv2", details.Price2);
+        update.Parameters.AddWithValue("@pv3", details.Price3);
+        update.Parameters.AddWithValue("@pqte", details.WholesalePrice);
+        update.Parameters.AddWithValue("@pqtemin", details.WholesaleMinQty);
+        update.Parameters.AddWithValue("@smin", details.MinStock);
+        update.Parameters.AddWithValue("@tva", details.VatRate);
+        update.Parameters.AddWithValue("@promo", details.Promotion);
+        update.Parameters.AddWithValue("@groupe", details.Group ?? "");
         if (hasLocation) update.Parameters.AddWithValue("@location", details.Location);
         update.Parameters.AddWithValue("@row", reviewed.RowId);
         update.Parameters.AddWithValue("@id", reviewed.Id);
         if (update.ExecuteNonQuery() != 1 ||
             ReadCard(connection, transaction, reviewed.Id, true) != updated)
-            throw new InvalidOperationException("Modification de la fiche non confirmée.");
+            throw new InvalidOperationException("Modification de la fiche non confirmÃ©e.");
         transaction.Commit();
     }
 
+    private static bool HasColumn(MySqlConnection connection, MySqlTransaction transaction, string columnName) { using var query = new MySqlCommand("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='TABLE_ARTICLES' AND COLUMN_NAME=@col", connection, transaction); query.Parameters.AddWithValue("@col", columnName); return Convert.ToInt64(query.ExecuteScalar()) == 1; }
     private static bool HasLocation(MySqlConnection connection, MySqlTransaction transaction)
     {
         using var query = new MySqlCommand(
@@ -251,7 +262,7 @@ internal sealed class CataloguePriceEditor(string connectionString)
             throw new InvalidOperationException("Fiche article introuvable.");
         string Field(int index) => reader.IsDBNull(index) ? "" : reader.GetString(index);
         var card = new Card(reader.GetInt64(0), id, reader.GetString(1), Field(2), Field(3),
-            new CardDetails(Field(4), Field(5), Field(6), Field(7)));
+            new CardDetails(Field(4), Field(5), Field(6), Field(7), reader.GetDecimal(8), reader.GetDecimal(9), reader.GetDecimal(10), reader.GetDecimal(11), reader.GetDecimal(12), reader.GetDecimal(13), reader.GetDecimal(14), reader.GetDecimal(15), reader.GetDecimal(16), Field(17)));
         if (reader.Read()) throw new InvalidOperationException("Identifiant article ambigu.");
         return card;
     }
@@ -273,7 +284,7 @@ internal sealed class CataloguePriceEditor(string connectionString)
             "TABLE_ARTICLES", "hanouty_catalogue_price_audit");
         Authorize(connection, transaction, actor, pin);
         if (Read(connection, transaction, reviewed.Id, lockRow: true) != reviewed)
-            throw new InvalidOperationException("Le prix ou l’article a changé. Rechargez l’article.");
+            throw new InvalidOperationException("Le prix ou lâ€™article a changÃ©. Rechargez lâ€™article.");
         if (price == reviewed.Amount) return;
         using (var update = new MySqlCommand(
             "UPDATE TABLE_ARTICLES SET PRIX_V_1=@price WHERE BINARY ID_ARTICLE=BINARY @id",
@@ -282,10 +293,10 @@ internal sealed class CataloguePriceEditor(string connectionString)
             update.Parameters.AddWithValue("@price", price);
             update.Parameters.AddWithValue("@id", reviewed.Id);
             if (update.ExecuteNonQuery() != 1)
-                throw new InvalidOperationException("Modification du prix refusée.");
+                throw new InvalidOperationException("Modification du prix refusÃ©e.");
         }
         if (Read(connection, transaction, reviewed.Id, lockRow: true).Amount != price)
-            throw new InvalidOperationException("Le prix n’a pas été enregistré exactement.");
+            throw new InvalidOperationException("Le prix nâ€™a pas Ã©tÃ© enregistrÃ© exactement.");
         using (var audit = new MySqlCommand(
             "INSERT INTO hanouty_catalogue_price_audit (ARTICLE_ID,ACTOR,PREVIOUS_PRICE,NEW_PRICE) " +
             "VALUES (@id,@actor,@before,@after)", connection, transaction))
@@ -294,7 +305,7 @@ internal sealed class CataloguePriceEditor(string connectionString)
             audit.Parameters.AddWithValue("@actor", actor);
             audit.Parameters.AddWithValue("@before", reviewed.Amount);
             audit.Parameters.AddWithValue("@after", price);
-            if (audit.ExecuteNonQuery() != 1) throw new InvalidOperationException("Historique de prix non enregistré.");
+            if (audit.ExecuteNonQuery() != 1) throw new InvalidOperationException("Historique de prix non enregistrÃ©.");
         }
         transaction.Commit();
     }
@@ -303,14 +314,14 @@ internal sealed class CataloguePriceEditor(string connectionString)
     {
         // Form_2_ARTICLES.FUN_CAT_ACCES reserves catalogue editing for ADMIN.
         using (var auth = new MySqlCommand(
-            "SELECT ListPass, Catégorie FROM TABLE_PASS WHERE BINARY ListUser=BINARY @actor FOR UPDATE",
+            "SELECT ListPass, CatÃ©gorie FROM TABLE_PASS WHERE BINARY ListUser=BINARY @actor FOR UPDATE",
             connection, transaction))
         {
             auth.Parameters.AddWithValue("@actor", actor);
             using var reader = auth.ExecuteReader();
             if (string.IsNullOrWhiteSpace(pin) || !reader.Read() || reader.IsDBNull(0) || reader.IsDBNull(1) ||
                 reader.GetString(0) != pin || reader.GetString(1) != "ADMIN" || reader.Read())
-                throw new UnauthorizedAccessException("Modification du catalogue réservée à un administrateur.");
+                throw new UnauthorizedAccessException("Modification du catalogue rÃ©servÃ©e Ã  un administrateur.");
         }
     }
 
@@ -339,3 +350,4 @@ internal sealed class CataloguePriceEditor(string connectionString)
         catch { connection.Dispose(); throw; }
     }
 }
+
