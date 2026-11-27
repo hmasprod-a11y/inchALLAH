@@ -1,4 +1,4 @@
-﻿using Hanouty.ArchitectureBridge;
+using Hanouty.ArchitectureBridge;
 using Hanouty.Checkout.MariaDb;
 using Hanouty.Desktop.Wpf;
 using Hanouty.Desktop.Wpf.Presentation;
@@ -892,7 +892,7 @@ public sealed partial record CatalogueHost
                             () => ReadCashierPin(actor));
                         new DailyLogicaSettingsDialog(workflow) { Owner = window }.ShowDialog();
                     },
-                    () => { Authorize(); new WorkstationPrinterDialog(settings, twoDigitWorkstation, Authorize) { Owner = window }.ShowDialog(); },sessionCredentials is not null)
+                    () => { Authorize(); new WorkstationPrinterDialog(settings, twoDigitWorkstation, Authorize) { Owner = window }.ShowDialog(); },sessionCredentials is not null, sessionCredentials is null ? null : () => { Authorize(); var uStore = new WorkstationUsersStore(settings.ConnectionString, () => businessDocumentsOpen && vm.FinancialSessionActive && activeCashierId == actor && ReferenceEquals(context, settingsContext) ? actor : null, () => ReadCashierPin(actor)); new WorkstationUsersDialog(uStore) { Owner = window }.ShowDialog(); })
                     { Owner = window }.ShowDialog();
             }
             catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
