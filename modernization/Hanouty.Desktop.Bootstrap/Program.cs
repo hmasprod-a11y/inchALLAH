@@ -31,7 +31,14 @@ public static class Program
             CatalogueSettings? settings = null;
             try
             {
-                settings = WorkstationConfiguration.Interactive();
+                if (Environment.GetEnvironmentVariable("HANOUTY_CATALOGUE_CONNECTION") is not null)
+                {
+                    settings = CatalogueSettings.FromEnvironment();
+                }
+                else
+                {
+                    settings = WorkstationConfiguration.Load(WorkstationConfiguration.DefaultPath);
+                }
             }
             catch
             {
