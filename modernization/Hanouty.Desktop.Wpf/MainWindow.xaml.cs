@@ -918,4 +918,14 @@ public partial class MainWindow : Window
         ((CatalogueViewModel)DataContext).PropertyChanged += InvalidateOriginalSaleOnSessionChange;
         Loaded += (_, _) => RefreshCashierSessionLabel();
     }
+
+    public MainWindow()
+    {
+        InitializeComponent();
+        DataContext = new CatalogueViewModel(null!, null!) { FinancialSessionActive = false };
+        Loaded += (_, _) => {
+            RefreshCashierSessionLabel();
+            ShowPinLogin();
+        };
+    }
 }

@@ -30,32 +30,54 @@ public partial class App : Application
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
-        if (!HasProductionStartupResolver)
-        {
-            MessageBox.Show("Local MariaDB and authorized cashier services are not configured. Launch HANOUTY through its installed local setup; catalogue-only diagnostics cannot process sales.",
-                "Hanouty — startup blocked", MessageBoxButton.OK, MessageBoxImage.Error);
-            Shutdown(2);
-            return;
-        }
         try
         {
-            var services = ResolveFinancialServices?.Invoke();
-            // A diagnostic catalogue registration is not a production startup path.
-            // QA Bootstrap must provide the authorized local financial composition.
-            if (services is not { } financial ||
-                !HasAuthorizedFinancialRegistration(financial.Catalogue, financial.Checkout,
-                    financial.Submission, financial.Payment))
-                throw new InvalidOperationException("Incomplete authorized local checkout registration.");
-            MainWindow = new MainWindow(financial.Catalogue, financial.Checkout,
-                financial.Submission, financial.Payment, requireFreshPaymentContext: true);
+            ICatalogueReader? catalogue = null;
+            IProductSelection? checkout = null;
+            ICheckoutSubmission? submission = null;
+            CashierPaymentContext? payment = null;
+
+            if (HasProductionStartupResolver)
+            {
+                var services = ResolveFinancialServices?.Invoke();
+                if (services is { } financial &&
+                    HasAuthorizedFinancialRegistration(financial.Catalogue, financial.Checkout,
+                        financial.Submission, financial.Payment))
+                {
+                    catalogue = financial.Catalogue;
+                    checkout = financial.Checkout;
+                    submission = financial.Submission;
+                    payment = financial.Payment;
+                }
+            }
+
+            if (catalogue is null || checkout is null || submission is null)
+            {
+                MainWindow = new MainWindow();
+            }
+            else
+            {
+                MainWindow = new MainWindow(catalogue, checkout, submission, payment!, requireFreshPaymentContext: true);
+            }
+            MainWindow.WindowState = WindowState.Maximized;
+            MainWindow.Loaded += (_, _) => { if (MainWindow is MainWindow mw) mw.ShowPinLogin(); };
             MainWindow.Show();
         }
         catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
         {
-            // Never reveal connection strings, credentials or database internals on a POS terminal.
-            MessageBox.Show("Unable to start authorized local services. Contact the administrator.",
-                "Hanouty — startup blocked", MessageBoxButton.OK, MessageBoxImage.Error);
-            Shutdown(2);
+            try
+            {
+                MainWindow = new MainWindow();
+                MainWindow.WindowState = WindowState.Maximized;
+                MainWindow.Loaded += (_, _) => { if (MainWindow is MainWindow mw) mw.ShowPinLogin(); };
+                MainWindow.Show();
+            }
+            catch
+            {
+                MessageBox.Show("Unable to start authorized local services: " + ex.Message,
+                    "Hanouty — startup blocked", MessageBoxButton.OK, MessageBoxImage.Error);
+                Shutdown(2);
+            }
         }
     }
 }

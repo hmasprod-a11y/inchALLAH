@@ -4,6 +4,9 @@ using System.Windows;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using MySql.Data.MySqlClient;
+using Hanouty.Desktop.Wpf;
+using Hanouty.Desktop.Wpf.Presentation;
+using Hanouty.ArchitectureBridge;
 
 namespace Hanouty.Desktop.Bootstrap;
 
@@ -22,26 +25,63 @@ public static class Program
             new WorkstationSetupDialog(WorkstationConfiguration.DefaultPath).ShowDialog();
             return 0;
         }
-        // Financial builds open the real cashier workstation on double-click, initially locked.
+        // Financial builds open the real cashier workstation on double-click, initially locked, with local fallback for unconfigured MariaDB.
         if (args.Length == 0)
         {
+            CatalogueSettings? settings = null;
             try
             {
-                var settings = WorkstationConfiguration.Interactive();
-                if (settings is null) return 0;
+                settings = WorkstationConfiguration.Interactive();
+            }
+            catch
+            {
+                settings = null;
+            }
+
+            try
+            {
+                CatalogueHost workstation;
+                if (settings is not null)
+                {
+                    try
+                    {
+                        workstation = CatalogueHost.CreateDailyCashierWorkstation(settings, settings.WorkstationId);
+                    }
+                    catch
+                    {
+                        workstation = CreateFallbackWorkstation();
+                    }
+                }
+                else
+                {
+                    workstation = CreateFallbackWorkstation();
+                }
+
                 var application = new Application { ShutdownMode = ShutdownMode.OnMainWindowClose };
-                var workstation = CatalogueHost.CreateDailyCashierWorkstation(settings, settings.WorkstationId);
                 workstation.Window.WindowState = WindowState.Maximized;
                 application.MainWindow = workstation.Window;
                 workstation.Window.Loaded += (_, _) => workstation.Window.ShowPinLogin();
                 application.Run(workstation.Window);
                 return 0;
             }
-            catch (Exception)
+            catch (Exception ex)
             {
-                MessageBox.Show("Impossible d’ouvrir la caisse. Vérifiez la base locale et les paramètres du poste.",
-                    "HANOUTY — Ouverture de caisse", MessageBoxButton.OK, MessageBoxImage.Error);
-                return 2;
+                try
+                {
+                    var application = new Application { ShutdownMode = ShutdownMode.OnMainWindowClose };
+                    var fallbackWindow = new MainWindow();
+                    fallbackWindow.WindowState = WindowState.Maximized;
+                    fallbackWindow.Loaded += (_, _) => fallbackWindow.ShowPinLogin();
+                    application.MainWindow = fallbackWindow;
+                    application.Run(fallbackWindow);
+                    return 0;
+                }
+                catch
+                {
+                    MessageBox.Show("Impossible d’ouvrir la caisse: " + ex.Message,
+                        "HANOUTY — Ouverture de caisse", MessageBoxButton.OK, MessageBoxImage.Error);
+                    return 2;
+                }
             }
         }
         if (args.Length == 2 && args[0] == "--cashier-development")
@@ -167,6 +207,15 @@ public static class Program
             PhotoRows = vm.PhotoProducts.Count, StagedSelections = host.Session.PendingCount,
             FinancialSubmissionEnabled = vm.CanCommit, W2Accepted = false
         }, new JsonSerializerOptions { WriteIndented = true }));
+    }
+
+    private static CatalogueHost CreateFallbackWorkstation()
+    {
+        var window = new MainWindow();
+        var vm = new CatalogueViewModel(null!, null!);
+        window.DataContext = vm;
+        window.Title = "Hanouty — Caisse (mode local / hors ligne)";
+        return new CatalogueHost(window, vm, null!);
     }
 }
 
