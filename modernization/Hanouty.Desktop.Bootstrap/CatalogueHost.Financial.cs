@@ -1,4 +1,4 @@
-using Hanouty.ArchitectureBridge;
+﻿using Hanouty.ArchitectureBridge;
 using Hanouty.Checkout.MariaDb;
 using Hanouty.Desktop.Wpf;
 using Hanouty.Desktop.Wpf.Presentation;
@@ -12,11 +12,11 @@ namespace Hanouty.Desktop.Bootstrap;
 public sealed partial record CatalogueHost
 {
     private sealed class CashierBasketReader(Func<MySqlConnection> connections, CheckoutSession session,
-        Func<ApprovedManualDiscount?> currentManualDiscount)
+        Func<ApprovedManualDiscount?> currentManualDiscount, Func<IReadOnlyDictionary<string, decimal>> currentFreePrices)
         : ICurrentBasketReader
     {
         public IReadOnlyList<BasketDisplayLine> ReadCurrentBasket() =>
-            MariaDbCashCheckoutServices.ReadCashSaleBasket(connections, session.PendingLines, currentManualDiscount())
+            MariaDbCashCheckoutServices.ReadCashSaleBasket(connections, session.PendingLines, currentManualDiscount(), currentFreePrices())
                 .Select(line => new BasketDisplayLine(line.ArticleId, line.ArticleName, line.Quantity, line.UnitPrice,
                     line.DiscountPercent, line.Amount))
                 .ToArray();
@@ -65,7 +65,7 @@ public sealed partial record CatalogueHost
             if (string.IsNullOrWhiteSpace(frozen.CashierId) || frozen.Currency != "MAD" || frozen.IsReturn ||
                 frozen.Customer is null || frozen.ExpectedTotal <= 0m || frozen.Payments[0].Amount != frozen.ExpectedTotal ||
                 decimal.Round(frozen.ExpectedTotal, 2) != frozen.ExpectedTotal)
-                throw new ArgumentException("Le crédit doit correspondre au net du ticket.");
+                throw new ArgumentException("Le crÃ©dit doit correspondre au net du ticket.");
             frozen.Customer.Validate();
             return frozen;
         }
@@ -176,16 +176,17 @@ public sealed partial record CatalogueHost
         var contextConsumed = false;
         string? waitingSaleId = null;
         ApprovedManualDiscount? manualDiscount = null;
+        var freePrices = new Dictionary<string, decimal>(StringComparer.OrdinalIgnoreCase);
         var utf8Connection = new MySqlConnectionStringBuilder(settings.ConnectionString) { CharacterSet = "utf8mb4" }.ConnectionString;
         Func<MySqlConnection> connections = () => new MySqlConnection(utf8Connection);
         var posting = MariaDbCashCheckoutServices.CreatePostingPort(
-            connections, twoDigitWorkstation, transientPinProvider, () => waitingSaleId, () => manualDiscount, WorkstationPrinterProfile.FeatureDirectory(settings));
+            connections, twoDigitWorkstation, transientPinProvider, () => waitingSaleId, () => manualDiscount, WorkstationPrinterProfile.FeatureDirectory(settings), () => new Dictionary<string, decimal>(freePrices, StringComparer.OrdinalIgnoreCase));
         posting = new AcknowledgementFaultPort(posting, () => {
             // Consume at the real financial boundary, not merely in UI state.
             // Retain the immutable context for lost-ack journal review only.
             contextConsumed = true;
             waitingSaleId = null;
-            manualDiscount = null;
+            manualDiscount = null; freePrices.Clear();
             afterCommitAcknowledgementFault?.Invoke();
         }, postingFailureDiagnostic);
         var journal = MariaDbCashCheckoutServices.CreateOperationJournal(connections);
@@ -204,10 +205,11 @@ public sealed partial record CatalogueHost
         ApprovedManualDiscount? CurrentManualDiscount()
         {
             manualDiscount = MariaDbCashCheckoutServices.RetainManualDiscountForBasket(manualDiscount, binding.Session.PendingLines);
-            if (manualDiscount?.CashierId != activeCashierId) manualDiscount = null;
+            if (manualDiscount?.CashierId != activeCashierId) manualDiscount = null; freePrices.Clear();
             return manualDiscount;
         }
-        var basketReader = new CashierBasketReader(connections, binding.Session, CurrentManualDiscount);
+        IReadOnlyDictionary<string, decimal> CurrentFreePrices() { var ids = new HashSet<string>(binding.Session.PendingLines.Select(l => l.ArticleId), StringComparer.OrdinalIgnoreCase); foreach (var k in freePrices.Keys.Where(k => !ids.Contains(k)).ToArray()) freePrices.Remove(k); return new Dictionary<string, decimal>(freePrices, StringComparer.OrdinalIgnoreCase); }
+        var basketReader = new CashierBasketReader(connections, binding.Session, CurrentManualDiscount, CurrentFreePrices);
         var window = new MainWindow(services.Catalogue, services.Checkout, services.Submission, context,
             requireFreshPaymentContext: true, basketReader: basketReader);
         var vm = (CatalogueViewModel)window.DataContext;
@@ -246,7 +248,7 @@ public sealed partial record CatalogueHost
                     if (!reviewing || !vm.FinancialSessionActive || activeCashierId != cashier ||
                         vm.CheckoutBusy || vm.CheckoutUncertain || vm.PendingOperationId is not null ||
                         !snapshot.SequenceEqual(binding.Session.PendingLines))
-                        throw new InvalidOperationException("Le panier ou la session a changé. Revoyez la remise.");
+                        throw new InvalidOperationException("Le panier ou la session a changÃ©. Revoyez la remise.");
                 }
                 return new ManualDiscountReview(choice =>
                 {
@@ -260,7 +262,7 @@ public sealed partial record CatalogueHost
                 {
                     RequireSameReview();
                     if (reviewedChoice != choice || reviewedPreview is null)
-                        throw new InvalidOperationException("Vérifiez le calcul de la remise avant de confirmer.");
+                        throw new InvalidOperationException("VÃ©rifiez le calcul de la remise avant de confirmer.");
                     var approved = MariaDbCashCheckoutServices.ApplyManualDiscount(connections, authorization,
                         snapshot, previous, choice.ArticleId, choice.Percentage, choice.Value, reviewedPreview);
                     manualDiscount = approved;
@@ -287,9 +289,9 @@ public sealed partial record CatalogueHost
                 : null;
             return ConfirmCashDrawer(window,
             request.Payments[0].Kind == CheckoutPaymentKind.Credit
-                ? $"Retour crédit de {request.ExpectedTotal:N2} MAD pour {request.Customer?.Name}.\nCette opération réduit la dette et remet le stock. Aucun remboursement espèces."
-                : $"Ticket {printedNumber} : remboursement CARTE de {request.ExpectedTotal:N2} MAD.\nConfirmez que le remboursement a été effectué sur le terminal externe. Aucun remboursement espèces.",
-            request.Payments[0].Kind == CheckoutPaymentKind.Credit ? "Confirmer le retour crédit" : "Confirmer le remboursement CARTE");
+                ? $"Retour crÃ©dit de {request.ExpectedTotal:N2} MAD pour {request.Customer?.Name}.\nCette opÃ©ration rÃ©duit la dette et remet le stock. Aucun remboursement espÃ¨ces."
+                : $"Ticket {printedNumber} : remboursement CARTE de {request.ExpectedTotal:N2} MAD.\nConfirmez que le remboursement a Ã©tÃ© effectuÃ© sur le terminal externe. Aucun remboursement espÃ¨ces.",
+            request.Payments[0].Kind == CheckoutPaymentKind.Credit ? "Confirmer le retour crÃ©dit" : "Confirmer le remboursement CARTE");
         };
         returnHost.SelectPartial = (candidate, operation, cashier) =>
         {
@@ -304,7 +306,7 @@ public sealed partial record CatalogueHost
                 binding.Session.PendingCount != 0) return false;
             // A return uses persisted original amounts, never a consumed sale tender.
             contextConsumed = true;
-            manualDiscount = null;
+            manualDiscount = null; freePrices.Clear();
             context = new CashierPaymentContext(activeCashierId, twoDigitWorkstation, "MAD", returnHost.Mode == "PartialCash" ? "Cash" : returnHost.Mode, 0m);
             vm.PaymentContext = context;
             return true;
@@ -321,7 +323,7 @@ public sealed partial record CatalogueHost
                 (activeCashierId is null || frozen.CashierId != activeCashierId))
                 return false;
             captured = frozen;
-            if (binding.Session.PendingCount == 0 || activeCashierId != frozen.CashierId) manualDiscount = null;
+            if (binding.Session.PendingCount == 0 || activeCashierId != frozen.CashierId) manualDiscount = null; freePrices.Clear();
             activeCashierId = frozen.CashierId;
             contextConsumed = false;
             context = ToWpfContext(frozen, twoDigitWorkstation);
@@ -335,7 +337,7 @@ public sealed partial record CatalogueHost
             captured = null;
             activeCashierId = null;
             sessionCredentials?.Clear();
-            manualDiscount = null;
+            manualDiscount = null; freePrices.Clear();
             waitingSaleId = null;
             contextConsumed = true;
             context = null;
@@ -373,7 +375,7 @@ public sealed partial record CatalogueHost
                     return false;
                 binding.Session.DiscardInvalidated();
                 waitingSaleId = null;
-                manualDiscount = null;
+                manualDiscount = null; freePrices.Clear();
                 contextConsumed = true;
                 lastReviewed = operation;
                 return true; // UI owner may now explicitly reset its review state.
@@ -387,8 +389,9 @@ public sealed partial record CatalogueHost
         decimal? ReadTrustedTotal()
         {
             if (!CanChangeContext()) return null;
-            return MariaDbCashCheckoutServices.ReadCashSaleTotal(connections, binding.Session.PendingLines, CurrentManualDiscount());
+            return MariaDbCashCheckoutServices.ReadCashSaleTotal(connections, binding.Session.PendingLines, CurrentManualDiscount(), CurrentFreePrices());
         }
+        window.ConfigureBasketPrice((articleId, price) => { if (!CanChangeContext() || !vm.FinancialSessionActive || activeCashierId is null || price < 0m) return false; if (!binding.Session.PendingLines.Any(line => string.Equals(line.ArticleId, articleId, StringComparison.OrdinalIgnoreCase))) return false; if (sessionCredentials is not null) { try { MariaDbCashCheckoutServices.VerifyCashierSession(connections, activeCashierId, () => ReadCashierPin(activeCashierId)); if (!OriginalCashierPermissions.Authorize(connections, activeCashierId, "PRIX_LIBRE", window.PromptCashDrawerApproval)) { window.SetBasketActionFeedback("Prix libre non autorise."); return false; } } catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException) { window.SetBasketActionFeedback("Session invalide."); return false; } } freePrices[articleId] = decimal.Round(price, 2, MidpointRounding.AwayFromZero); captured = null; contextConsumed = true; context = new CashierPaymentContext(activeCashierId, twoDigitWorkstation, "MAD", "Cash", 0m); vm.PaymentContext = context; return true; });
         window.ConfigureBasketQuantity((articleId, quantity) =>
         {
             if (!CanChangeContext() || !vm.FinancialSessionActive ||
@@ -400,9 +403,9 @@ public sealed partial record CatalogueHost
                 {
                     MariaDbCashCheckoutServices.VerifyCashierSession(connections,activeCashierId,()=>ReadCashierPin(activeCashierId));
                     if(!OriginalCashierPermissions.Authorize(connections,activeCashierId,quantity==0?"ANNULATION":"MODIF_QTE",window.PromptCashDrawerApproval))
-                    {window.SetBasketActionFeedback("Cette modification n’est pas autorisée pour le caissier.");return false;}
+                    {window.SetBasketActionFeedback("Cette modification nâ€™est pas autorisÃ©e pour le caissier.");return false;}
                 }
-                catch(Exception ex)when(ex is not OutOfMemoryException and not StackOverflowException){window.SetBasketActionFeedback("La session ou les droits ont changé. Reconnectez le caissier.");return false;}
+                catch(Exception ex)when(ex is not OutOfMemoryException and not StackOverflowException){window.SetBasketActionFeedback("La session ou les droits ont changÃ©. Reconnectez le caissier.");return false;}
             }
             if(!binding.Session.SetPendingQuantity(articleId,quantity))return false;
             if (binding.Session.PendingCount == 0) waitingSaleId = null;
@@ -423,7 +426,7 @@ public sealed partial record CatalogueHost
                 binding.Session.DiscardInvalidated();manualDiscount=null;waitingSaleId=null;captured=null;contextConsumed=true;
                 context=new CashierPaymentContext(actor,twoDigitWorkstation,"MAD","Cash",0m);vm.PaymentContext=context;return true;
             }
-            catch(Exception ex)when(ex is not OutOfMemoryException and not StackOverflowException){window.SetBasketActionFeedback("Le panier n’a pas été annulé. Vérifiez la session et les droits.");return false;}
+            catch(Exception ex)when(ex is not OutOfMemoryException and not StackOverflowException){window.SetBasketActionFeedback("Le panier nâ€™a pas Ã©tÃ© annulÃ©. VÃ©rifiez la session et les droits.");return false;}
         });
         window.ConfigurePinLogin(pin =>
         {
@@ -436,11 +439,11 @@ public sealed partial record CatalogueHost
                 MariaDbCashCheckoutServices.VerifyCashierSession(connections, cashier, () => pin);
             }
             catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
-            { window.SetLoginFeedback("Code d’accès incorrect ou utilisateur indisponible."); return false; }
+            { window.SetLoginFeedback("Code dâ€™accÃ¨s incorrect ou utilisateur indisponible."); return false; }
             finally { reviewing = false; }
             if (!CanChangeContext() || binding.Session.PendingCount != 0 || ReadTrustedTotal() != 0m) return false;
             sessionCredentials?.Bind(cashier, pin);
-            activeCashierId = cashier; captured = null; contextConsumed = true; manualDiscount = null; waitingSaleId = null;
+            activeCashierId = cashier; captured = null; contextConsumed = true; manualDiscount = null; freePrices.Clear(); waitingSaleId = null;
             context = new CashierPaymentContext(cashier, twoDigitWorkstation, "MAD", "Cash", 0m);
             vm.PaymentContext = context; vm.FinancialSessionActive = true;
             return true;
@@ -491,7 +494,7 @@ public sealed partial record CatalogueHost
                 binding.Session.PendingCount == 0) return false;
             if (!MariaDbCashCheckoutServices.IsCardPaymentAvailable(connections))
             {
-                window.SetCardPaymentFeedback("Le mode CARTE n’est pas disponible dans la configuration des paiements.");
+                window.SetCardPaymentFeedback("Le mode CARTE nâ€™est pas disponible dans la configuration des paiements.");
                 return false;
             }
             var total = ReadTrustedTotal();
@@ -515,7 +518,7 @@ public sealed partial record CatalogueHost
                 binding.Session.PendingCount == 0) return false;
             if (!MariaDbCashCheckoutServices.IsCardPaymentAvailable(connections))
             {
-                window.SetCardPaymentFeedback("Le mode CARTE n’est pas disponible dans la configuration des paiements.");
+                window.SetCardPaymentFeedback("Le mode CARTE nâ€™est pas disponible dans la configuration des paiements.");
                 return false;
             }
             var total = ReadTrustedTotal();
@@ -541,7 +544,7 @@ public sealed partial record CatalogueHost
                 binding.Session.PendingCount == 0) return false;
             if (!MariaDbCashCheckoutServices.IsCreditSaleEnabled(WorkstationPrinterProfile.FeatureDirectory(settings)))
             {
-                window.SetCardPaymentFeedback("La gestion du crédit est désactivée dans la configuration LOGICA.");
+                window.SetCardPaymentFeedback("La gestion du crÃ©dit est dÃ©sactivÃ©e dans la configuration LOGICA.");
                 window.RefreshCreditSaleAvailability();
                 return false;
             }
@@ -570,7 +573,7 @@ public sealed partial record CatalogueHost
             if (!CanChangeContext() || !vm.FinancialSessionActive ||
                 activeCashierId is not { } cashier || binding.Session.PendingCount != 0)
             {
-                System.Windows.MessageBox.Show(window, "Terminez le panier en cours avant la clôture.", "Clôture");
+                System.Windows.MessageBox.Show(window, "Terminez le panier en cours avant la clÃ´ture.", "ClÃ´ture");
                 return false;
             }
 
@@ -585,13 +588,13 @@ public sealed partial record CatalogueHost
                 var preview = cashClosing.Read(cashier, pin, cashierOnly, approvalPin);
                 var summary = $"Fond de caisse : {preview.Opening:N2} MAD\n" +
                     $"Ventes nettes : {preview.NetSales:N2} MAD\n" +
-                    $"Espèces ventes et retours : {preview.CashSales:N2} MAD\n" +
-                    $"Règlements clients en espèces : {preview.ClientCash:N2} MAD\n" +
-                    $"Règlements fournisseurs en espèces : {preview.SupplierCash:N2} MAD\n" +
-                    $"Dépenses : {preview.Expenses:N2} MAD\n" +
-                    $"Attendu : {preview.Expected:N2} MAD\nCompté : {counted:N2} MAD\n" +
-                    $"Écart : {counted - preview.Expected:N2} MAD\n\nValider la clôture n° {preview.Number} ?";
-                if (!ConfirmCashDrawer(window, summary, cashierOnly ? "Clôture caissier" : "Clôture globale")) return false;
+                    $"EspÃ¨ces ventes et retours : {preview.CashSales:N2} MAD\n" +
+                    $"RÃ¨glements clients en espÃ¨ces : {preview.ClientCash:N2} MAD\n" +
+                    $"RÃ¨glements fournisseurs en espÃ¨ces : {preview.SupplierCash:N2} MAD\n" +
+                    $"DÃ©penses : {preview.Expenses:N2} MAD\n" +
+                    $"Attendu : {preview.Expected:N2} MAD\nComptÃ© : {counted:N2} MAD\n" +
+                    $"Ã‰cart : {counted - preview.Expected:N2} MAD\n\nValider la clÃ´ture nÂ° {preview.Number} ?";
+                if (!ConfirmCashDrawer(window, summary, cashierOnly ? "ClÃ´ture caissier" : "ClÃ´ture globale")) return false;
                 cashClosing.Close(cashier, pin, preview, approvalPin);
                 var report = new System.Windows.Controls.TextBlock
                 {
@@ -601,7 +604,7 @@ public sealed partial record CatalogueHost
                 };
                 var reportWindow = new System.Windows.Window
                 {
-                    Title = $"Clôture n° {preview.Number} enregistrée",
+                    Title = $"ClÃ´ture nÂ° {preview.Number} enregistrÃ©e",
                     Owner = window, Width = 440, SizeToContent = System.Windows.SizeToContent.Height,
                     WindowStartupLocation = System.Windows.WindowStartupLocation.CenterOwner
                 };
@@ -622,7 +625,7 @@ public sealed partial record CatalogueHost
                     catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
                     {
                         System.Windows.MessageBox.Show(reportWindow,
-                            "Impression indisponible. La clôture est enregistrée.", "Impression");
+                            "Impression indisponible. La clÃ´ture est enregistrÃ©e.", "Impression");
                     }
                 };
                 layout.Children.Add(print);
@@ -632,13 +635,13 @@ public sealed partial record CatalogueHost
             }
             catch (UnauthorizedAccessException)
             {
-                System.Windows.MessageBox.Show(window, "Clôture non autorisée.", "Clôture");
+                System.Windows.MessageBox.Show(window, "ClÃ´ture non autorisÃ©e.", "ClÃ´ture");
                 return false;
             }
             catch (Exception ex) when (ex is MySqlException or InvalidOperationException)
             {
                 System.Windows.MessageBox.Show(window,
-                    "La clôture n’a pas pu être confirmée. Vérifiez l’état des mouvements avant une nouvelle tentative.", "Clôture");
+                    "La clÃ´ture nâ€™a pas pu Ãªtre confirmÃ©e. VÃ©rifiez lâ€™Ã©tat des mouvements avant une nouvelle tentative.", "ClÃ´ture");
                 return false;
             }
             finally { reviewing = false; }
@@ -658,7 +661,7 @@ public sealed partial record CatalogueHost
             }
             catch (Exception ex) when (ex is MySqlException or InvalidOperationException or UnauthorizedAccessException)
             {
-                System.Windows.MessageBox.Show(window, "Le fond de caisse n’a pas pu être enregistré.", "Fond de caisse");
+                System.Windows.MessageBox.Show(window, "Le fond de caisse nâ€™a pas pu Ãªtre enregistrÃ©.", "Fond de caisse");
                 return false;
             }
             finally { reviewing = false; }
@@ -682,11 +685,11 @@ public sealed partial record CatalogueHost
             }
             catch (UnauthorizedAccessException)
             {
-                System.Windows.MessageBox.Show(window, "Dépenses non autorisées pour cet utilisateur.", "Dépenses");
+                System.Windows.MessageBox.Show(window, "DÃ©penses non autorisÃ©es pour cet utilisateur.", "DÃ©penses");
             }
             catch (Exception ex) when (ex is MySqlException or InvalidOperationException)
             {
-                System.Windows.MessageBox.Show(window, "Impossible d’ouvrir les dépenses de caisse.", "Dépenses");
+                System.Windows.MessageBox.Show(window, "Impossible dâ€™ouvrir les dÃ©penses de caisse.", "DÃ©penses");
             }
             finally { reviewing = false; }
         });
@@ -756,7 +759,7 @@ public sealed partial record CatalogueHost
                 {
                     var pin = ReadCashierPin(actor);
                     if (string.IsNullOrWhiteSpace(pin) ||
-                        !ConfirmCashDrawer(window, $"Annuler le bon {reviewed.Id} et libérer la quantité réservée ?",
+                        !ConfirmCashDrawer(window, $"Annuler le bon {reviewed.Id} et libÃ©rer la quantitÃ© rÃ©servÃ©e ?",
                             "Annulation du bon")) return false;
                     receipt.Cancel(reviewed, actor, pin);
                     return true;
@@ -809,8 +812,8 @@ public sealed partial record CatalogueHost
             }
             catch (Exception)
             {
-                System.Windows.MessageBox.Show(window, "Impossible d’ouvrir les règlements fournisseurs.",
-                    "Règlement fournisseur", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Warning);
+                System.Windows.MessageBox.Show(window, "Impossible dâ€™ouvrir les rÃ¨glements fournisseurs.",
+                    "RÃ¨glement fournisseur", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Warning);
             }
         });
         window.ConfigureDailyStock(() =>
@@ -825,14 +828,14 @@ public sealed partial record CatalogueHost
                     vm.PendingOperationId is null && binding.Session.PendingCount == 0 && binding.Session.State == CheckoutCommitState.Ready;
                 void Child(Action action)
                 {
-                    if (!Active() || dailyStockChild) throw new InvalidOperationException("La session du stock a changé.");
+                    if (!Active() || dailyStockChild) throw new InvalidOperationException("La session du stock a changÃ©.");
                     dailyStockChild = true;
                     try { action(); }
                     finally { dailyStockChild = false; }
                 }
                 var reader = new DailyStockReader(settings.ConnectionString);
                 var access = reader.Authorize(actor, role => Active() ? window.PromptCashDrawerApproval(role) : "");
-                if (!Active()) throw new InvalidOperationException("La session du stock a changé.");
+                if (!Active()) throw new InvalidOperationException("La session du stock a changÃ©.");
                 new DailyStockDialog(reader, access, new DailyStockHooks(
                     OpenArticle: selected => Child(() => OpenCatalogue(selected.Id)),
                     NewArticle: () => Child(() => OpenCatalogue(creating: true)),
@@ -849,7 +852,7 @@ public sealed partial record CatalogueHost
                     }))) { Owner = window }.ShowDialog();
             }
             catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
-            { window.SetBasketActionFeedback(ex is UnauthorizedAccessException or InvalidOperationException ? ex.Message : "Stock indisponible. Vérifiez la connexion et les données du poste."); }
+            { window.SetBasketActionFeedback(ex is UnauthorizedAccessException or InvalidOperationException ? ex.Message : "Stock indisponible. VÃ©rifiez la connexion et les donnÃ©es du poste."); }
             finally { dailyStockChild = false; dailyStockOpen = false; vm.ReloadCatalogue(); }
         });
         window.ConfigureWorkstationSettings(() =>
@@ -867,7 +870,7 @@ public sealed partial record CatalogueHost
                     if (!businessDocumentsOpen || !vm.FinancialSessionActive || activeCashierId != actor ||
                         !ReferenceEquals(context, settingsContext) || vm.CheckoutBusy || vm.CheckoutUncertain ||
                         vm.PendingOperationId is not null || binding.Session.PendingCount != 0 || binding.Session.State != CheckoutCommitState.Ready)
-                        throw new UnauthorizedAccessException("La session des paramètres a changé.");
+                        throw new UnauthorizedAccessException("La session des paramÃ¨tres a changÃ©.");
                     settingsStore.Read(access); // Recheck exact current ADMIN role without retaining the PIN.
                 }
                 Authorize();
@@ -893,7 +896,7 @@ public sealed partial record CatalogueHost
                     { Owner = window }.ShowDialog();
             }
             catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
-            { System.Windows.MessageBox.Show(window, ex is UnauthorizedAccessException or InvalidOperationException ? ex.Message : "Paramètres indisponibles.", "Paramètres du poste"); }
+            { System.Windows.MessageBox.Show(window, ex is UnauthorizedAccessException or InvalidOperationException ? ex.Message : "ParamÃ¨tres indisponibles.", "ParamÃ¨tres du poste"); }
             finally { businessDocumentsOpen = false; }
         });
         window.ConfigureSalesJournal(statistics =>
@@ -908,7 +911,7 @@ public sealed partial record CatalogueHost
                     vm.PendingOperationId is null && binding.Session.PendingCount == 0 && binding.Session.State == CheckoutCommitState.Ready;
                 var reader = new SalesJournalReader(settings.ConnectionString);
                 var access = reader.Authorize(actor, () => ReadCashierPin(actor), statistics);
-                if (!Active()) throw new InvalidOperationException("La session du journal a changé.");
+                if (!Active()) throw new InvalidOperationException("La session du journal a changÃ©.");
                 var workflow = new SalesJournalWorkflow(reader, access, Active, selected =>
                 {
                     using var db = connections(); db.Open();
@@ -1043,13 +1046,13 @@ public sealed partial record CatalogueHost
             using var connection = connections();
             if (connection.State != System.Data.ConnectionState.Open) connection.Open();
             var ticket = LogicaPostedTicket.Read(connection, operation, payment.CashierId, payment.RegisterId)
-                ?? throw new InvalidOperationException("Le ticket enregistré est introuvable.");
+                ?? throw new InvalidOperationException("Le ticket enregistrÃ© est introuvable.");
             var change = -ticket.Payments.Where(row => row.Mode == "ESPECES" && row.Amount < 0m).Sum(row => row.Amount);
             window.SetLastSaleSummary(ticket.Operation.StartsWith("RETOUR", StringComparison.Ordinal)
-                ? $"{ticket.Operation} {ticket.Number} · {ticket.Total:F2} MAD"
+                ? $"{ticket.Operation} {ticket.Number} Â· {ticket.Total:F2} MAD"
                 : ticket.Operation == "CREDIT"
-                ? $"Crédit {ticket.Number} · {ticket.CustomerName} · {ticket.Total:F2} MAD"
-                : $"Dernier ticket {ticket.Number} · À rendre {change:F2} MAD");
+                ? $"CrÃ©dit {ticket.Number} Â· {ticket.CustomerName} Â· {ticket.Total:F2} MAD"
+                : $"Dernier ticket {ticket.Number} Â· Ã€ rendre {change:F2} MAD");
             if (!System.IO.File.Exists(System.IO.Path.Combine(directory, "PRINTER_CL.sni"))) return;
             LogicaCashReceiptPrinter.Print(connection, directory, operation, payment.CashierId, payment.RegisterId);
         };
@@ -1058,14 +1061,13 @@ public sealed partial record CatalogueHost
             if (!CanChangeContext() || !vm.FinancialSessionActive || activeCashierId is not { } cashier ||
                 binding.Session.PendingCount == 0) return null;
             if (waitingSaleId is not null)
-                throw new InvalidOperationException("Cette vente figure déjà dans les attentes.");
+                throw new InvalidOperationException("Cette vente figure dÃ©jÃ  dans les attentes.");
             reviewing = true;
             try
             {
-                var waitingId = LogicaWaitingSale.Save(connections, binding.Session.PendingLines, cashier,
-                    twoDigitWorkstation, CurrentManualDiscount());
+                var waitingId = LogicaWaitingSale.Save(connections, binding.Session.PendingLines, cashier, twoDigitWorkstation, CurrentManualDiscount());
                 binding.Session.Clear();
-                manualDiscount = null;
+                manualDiscount = null; freePrices.Clear();
                 captured = null;
                 contextConsumed = true;
                 context = new CashierPaymentContext(cashier, twoDigitWorkstation, "MAD", "Cash", 0m);
@@ -1110,13 +1112,13 @@ public sealed partial record CatalogueHost
                     {
                         var product = binding.Session.Products.SingleOrDefault(x => x.ArticleId == line.ArticleId);
                         if (product is null || binding.Session.SelectArticle(product, line.Quantity).Outcome != SelectionOutcome.Selected)
-                            throw new InvalidOperationException("Un article en attente n’est plus disponible.");
+                            throw new InvalidOperationException("Un article en attente nâ€™est plus disponible.");
                     }
                 }
                 catch
                 {
                     binding.Session.Clear();
-                    manualDiscount = null;
+                    manualDiscount = null; freePrices.Clear();
                     throw;
                 }
 
@@ -1164,31 +1166,31 @@ public sealed partial record CatalogueHost
         public Func<MariaDbCashCheckoutServices.PartialCashReturnCandidate, string, string, IReadOnlyList<CheckoutPartialReturnSelection>?>? SelectPartial { get; set; }
         public IReadOnlyList<OriginalSaleCandidate> FindPersistedSales(string receiptSearch) =>
             Mode == "PartialCash" ? MariaDbCashCheckoutServices.FindPartialCashReturnCandidatesByReceipt(connections, receiptSearch)
-                .Select(sale => new OriginalSaleCandidate(sale.SaleId, $"Ticket {sale.TicketNumber} — solde à reprendre {sale.RemainingNetMad:N2} MAD", sale.RemainingNetMad)).ToArray()
+                .Select(sale => new OriginalSaleCandidate(sale.SaleId, $"Ticket {sale.TicketNumber} â€” solde Ã  reprendre {sale.RemainingNetMad:N2} MAD", sale.RemainingNetMad)).ToArray()
             : Mode == "Credit" ? MariaDbCashCheckoutServices.FindFullCreditReturnCandidatesByReceipt(connections, receiptSearch)
-                .Select(sale => new OriginalSaleCandidate(sale.SaleId, $"Ticket {sale.TicketNumber} · {sale.Customer.Name} — dette {sale.CreditMad:N2} MAD", sale.CreditMad)).ToArray()
+                .Select(sale => new OriginalSaleCandidate(sale.SaleId, $"Ticket {sale.TicketNumber} Â· {sale.Customer.Name} â€” dette {sale.CreditMad:N2} MAD", sale.CreditMad)).ToArray()
             : Mode == "Card" ? MariaDbCashCheckoutServices.FindFullCardReturnCandidatesByReceipt(connections, receiptSearch)
-                .Select(sale => new OriginalSaleCandidate(sale.SaleId, $"Ticket {sale.TicketNumber} — CARTE {sale.RefundMad:N2} MAD", sale.RefundMad)).ToArray()
+                .Select(sale => new OriginalSaleCandidate(sale.SaleId, $"Ticket {sale.TicketNumber} â€” CARTE {sale.RefundMad:N2} MAD", sale.RefundMad)).ToArray()
             : MariaDbCashCheckoutServices.FindFullCashReturnCandidatesByReceipt(connections, receiptSearch)
                 .Select(sale => new OriginalSaleCandidate(sale.SaleId,
-                    $"Ticket {sale.TicketNumber} · {sale.ReceiptDate} · poste {sale.Register} — {sale.PaidMad:N2} MAD", sale.PaidMad))
+                    $"Ticket {sale.TicketNumber} Â· {sale.ReceiptDate} Â· poste {sale.Register} â€” {sale.PaidMad:N2} MAD", sale.PaidMad))
                 .ToArray();
 
         public AuthorizedCheckoutRequest PrepareFullTicketReturn(string operationId, string originalId, CashierPaymentContext context)
         {
             if (context?.IsWellFormed != true || context.TenderCode != (Mode == "PartialCash" ? "Cash" : Mode) || context.RegisterId != workstation || context.CurrencyCode != "MAD")
-                throw new InvalidOperationException("La session du retour a changé.");
+                throw new InvalidOperationException("La session du retour a changÃ©.");
             if (Mode == "Cash") return PrepareFullCashReturn(operationId, originalId, context);
             if (Mode == "PartialCash")
             {
                 var candidate = MariaDbCashCheckoutServices.FindPartialCashReturnCandidatesByReceipt(connections, originalId).Single(row => row.SaleId == originalId);
-                var selections = SelectPartial?.Invoke(candidate, operationId, context.CashierId) ?? throw new InvalidOperationException("Retour partiel annulé.");
+                var selections = SelectPartial?.Invoke(candidate, operationId, context.CashierId) ?? throw new InvalidOperationException("Retour partiel annulÃ©.");
                 return MariaDbCashCheckoutServices.PreparePartialCashReturnRequest(connections, operationId, context.CashierId, "MAD", originalId, selections);
             }
             var request = Mode == "Credit" ? MariaDbCashCheckoutServices.PrepareFullCreditReturnRequest(connections, operationId, context.CashierId, "MAD", originalId)
                 : Mode == "Card" ? MariaDbCashCheckoutServices.PrepareFullCardReturnRequest(connections, operationId, context.CashierId, "MAD", originalId, externalRefundConfirmed: true)
                 : throw new InvalidOperationException("Mode de retour invalide.");
-            if (Confirm?.Invoke(request) != true) throw new InvalidOperationException("Retour annulé avant écriture.");
+            if (Confirm?.Invoke(request) != true) throw new InvalidOperationException("Retour annulÃ© avant Ã©criture.");
             return request;
         }
 
@@ -1219,3 +1221,6 @@ public sealed partial record CatalogueHost
     }
 
 }
+
+
+

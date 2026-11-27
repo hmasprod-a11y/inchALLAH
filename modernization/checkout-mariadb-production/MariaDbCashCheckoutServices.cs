@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Data;
 using System.Collections.Generic;
 using System.Linq;
@@ -14,13 +14,13 @@ namespace Hanouty.Checkout.MariaDb
     {
         public static IAuthorizedCheckoutPort CreatePostingPort(Func<MySqlConnection> connections,
             string workstation, Func<string> readAuthenticatedCashierPin, Func<string?>? readWaitingSale = null,
-            Func<ApprovedManualDiscount?>? readManualDiscount = null, string creditConfigurationDirectory = null)
+            Func<ApprovedManualDiscount?>? readManualDiscount = null, string creditConfigurationDirectory = null, Func<IReadOnlyDictionary<string, decimal>?>? readFreePrices = null)
         {
             if (connections == null) throw new ArgumentNullException(nameof(connections));
             return new AuthorizedCheckoutMariaDbPort(
                 () => LocalConnection(connections),
                 new MariaDbCashCheckoutPreparation(workstation, readAuthenticatedCashierPin, readWaitingSale, readManualDiscount,
-                    creditConfigurationDirectory));
+                    creditConfigurationDirectory, readFreePrices));
         }
 
         public static ICheckoutOperationJournal CreateOperationJournal(Func<MySqlConnection> connections)
@@ -306,13 +306,13 @@ namespace Hanouty.Checkout.MariaDb
         // Application session lines. No UI prices, basket/claim/stock writes,
         // schema initialization or authorization grant. Commit revalidates SQL.
         public static decimal ReadCashSaleTotal(Func<MySqlConnection> connections,
-            IReadOnlyList<CheckoutBatchLine> lines, ApprovedManualDiscount approval = null) =>
-            ReadCashSaleBasket(connections, lines, approval).Sum(line => line.Amount);
+            IReadOnlyList<CheckoutBatchLine> lines, ApprovedManualDiscount approval = null, IReadOnlyDictionary<string, decimal>? freePrices = null) =>
+            ReadCashSaleBasket(connections, lines, approval, freePrices).Sum(line => line.Amount);
 
         public sealed record CashSaleBasketLine(string ArticleId, string ArticleName, int Quantity, decimal UnitPrice, decimal Amount, decimal DiscountPercent = 0m);
 
         public static IReadOnlyList<CashSaleBasketLine> ReadCashSaleBasket(Func<MySqlConnection> connections,
-            IReadOnlyList<CheckoutBatchLine> lines, ApprovedManualDiscount approval = null)
+            IReadOnlyList<CheckoutBatchLine> lines, ApprovedManualDiscount approval = null, IReadOnlyDictionary<string, decimal>? freePrices = null)
         {
             if (connections == null) throw new ArgumentNullException(nameof(connections));
             if (lines == null) throw new ArgumentNullException(nameof(lines));
@@ -341,7 +341,7 @@ namespace Hanouty.Checkout.MariaDb
                 connection.Open();
                 using (var transaction = connection.BeginTransaction())
                 {
-                    var basket = ReadCashSaleBasketInTransaction(connection, transaction, snapshot, approval);
+                    var basket = ReadCashSaleBasketInTransaction(connection, transaction, snapshot, approval, freePrices);
                     transaction.Commit();
                     return basket;
                 }
@@ -351,7 +351,7 @@ namespace Hanouty.Checkout.MariaDb
         // Used by parking: quote and saved rows share the same locked transaction.
         public static IReadOnlyList<CashSaleBasketLine> ReadCashSaleBasketInTransaction(
             MySqlConnection connection, MySqlTransaction transaction, IReadOnlyList<CheckoutBatchLine> lines,
-            ApprovedManualDiscount approval = null)
+            ApprovedManualDiscount approval = null, IReadOnlyDictionary<string, decimal>? freePrices = null)
         {
             if (connection is null || transaction is null || connection.State != ConnectionState.Open ||
                 !ReferenceEquals(transaction.Connection, connection))
@@ -382,7 +382,7 @@ namespace Hanouty.Checkout.MariaDb
             if (snapshot.Any(line => !articleIds.Add(line.ArticleId)))
                 throw new ArgumentException("Basket contains duplicate article identities.", nameof(lines));
             RequireInnoDb(connection, transaction, "TABLE_ARTICLES");
-            return MariaDbCashCheckoutPreparation.ReadCashSaleLines(snapshot, connection, transaction, approval)
+            return MariaDbCashCheckoutPreparation.ReadCashSaleLines(snapshot, connection, transaction, approval, freePrices)
                 .Select(line => new CashSaleBasketLine(line.ArticleId, line.ArticleName, line.Quantity,
                     line.UnitPrice, line.Amount, line.DiscountPercent)).ToArray();
         }
@@ -413,3 +413,4 @@ namespace Hanouty.Checkout.MariaDb
         }
     }
 }
+

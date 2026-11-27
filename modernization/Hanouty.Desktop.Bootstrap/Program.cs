@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Media;
@@ -35,10 +35,7 @@ public static class Program
                 {
                     settings = CatalogueSettings.FromEnvironment();
                 }
-                else if (File.Exists(WorkstationConfiguration.DefaultPath))
-                {
-                    settings = WorkstationConfiguration.Load(WorkstationConfiguration.DefaultPath);
-                }
+                else { settings = WorkstationConfiguration.Interactive(); }
             }
             catch
             {
@@ -54,10 +51,7 @@ public static class Program
                     {
                         workstation = CatalogueHost.CreateDailyCashierWorkstation(settings, settings.WorkstationId);
                     }
-                    catch
-                    {
-                        workstation = CreateFallbackWorkstation();
-                    }
+                    catch (Exception initEx) { MessageBox.Show("Erreur MariaDB : " + initEx.Message, "HANOUTY", MessageBoxButton.OK, MessageBoxImage.Warning); workstation = CreateFallbackWorkstation(); }
                 }
                 else
                 {
@@ -85,8 +79,8 @@ public static class Program
                 }
                 catch
                 {
-                    MessageBox.Show("Impossible d’ouvrir la caisse: " + ex.Message,
-                        "HANOUTY — Ouverture de caisse", MessageBoxButton.OK, MessageBoxImage.Error);
+                    MessageBox.Show("Impossible dâ€™ouvrir la caisse: " + ex.Message,
+                        "HANOUTY â€” Ouverture de caisse", MessageBoxButton.OK, MessageBoxImage.Error);
                     return 2;
                 }
             }
@@ -107,7 +101,7 @@ public static class Program
             }
             catch (Exception ex)
             {
-                MessageBox.Show(ex.Message, "Hanouty — cashier startup blocked", MessageBoxButton.OK, MessageBoxImage.Error);
+                MessageBox.Show(ex.Message, "Hanouty â€” cashier startup blocked", MessageBoxButton.OK, MessageBoxImage.Error);
                 return 2;
             }
         }
@@ -153,7 +147,7 @@ public static class Program
                 "Configure HANOUTY_CATALOGUE_CONNECTION for a local SELECT-only MariaDB account " +
                 "and HANOUTY_DATA_DIRECTORY for an existing local data directory. " +
                 "Financial operations remain disabled in this mode.",
-                "Hanouty — local catalogue setup required",
+                "Hanouty â€” local catalogue setup required",
                 MessageBoxButton.OK, MessageBoxImage.Error);
             return 2;
         }
@@ -221,8 +215,9 @@ public static class Program
         var window = new MainWindow();
         var vm = new CatalogueViewModel(null!, null!);
         window.DataContext = vm;
-        window.Title = "Hanouty — Caisse (mode local / hors ligne)";
+        window.Title = "Hanouty â€” Caisse (mode local / hors ligne)";
         return new CatalogueHost(window, vm, null!);
     }
 }
+
 

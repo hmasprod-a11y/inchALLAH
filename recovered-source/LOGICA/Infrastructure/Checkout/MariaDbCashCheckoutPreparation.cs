@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Data;
 using System.Globalization;
@@ -24,10 +24,11 @@ namespace LOGICA.Infrastructure.Checkout
         private readonly Func<string> readPin;
         private readonly Func<string?>? readWaitingSale;
         private readonly Func<ApprovedManualDiscount?>? readManualDiscount;
+        private readonly Func<IReadOnlyDictionary<string, decimal>?>? readFreePrices;
         private readonly string creditConfigurationDirectory;
 
         internal MariaDbCashCheckoutPreparation(string workstation, Func<string> readPin, Func<string?>? readWaitingSale = null,
-            Func<ApprovedManualDiscount?>? readManualDiscount = null, string creditConfigurationDirectory = null)
+            Func<ApprovedManualDiscount?>? readManualDiscount = null, string creditConfigurationDirectory = null, Func<IReadOnlyDictionary<string, decimal>?>? readFreePrices = null)
         {
             if (workstation == null || workstation.Length != 2 ||
                 workstation.Any(c => c < '0' || c > '9'))
@@ -35,6 +36,7 @@ namespace LOGICA.Infrastructure.Checkout
             this.workstation = workstation;
             this.readWaitingSale = readWaitingSale;
             this.readManualDiscount = readManualDiscount;
+            this.readFreePrices = readFreePrices;
             this.creditConfigurationDirectory = creditConfigurationDirectory;
             this.readPin = readPin ?? throw new ArgumentNullException(nameof(readPin));
         }
@@ -58,7 +60,7 @@ namespace LOGICA.Infrastructure.Checkout
                 throw new NotSupportedException("Only cash/card MAD sale allocations are accepted.");
             var credit = request.Payments.Count == 1 && request.Payments[0].Kind == CheckoutPaymentKind.Credit;
             if (credit && !MariaDbCashCheckoutServices.IsCreditSaleEnabled(creditConfigurationDirectory))
-                throw new InvalidOperationException("La gestion du crédit est désactivée dans la configuration LOGICA.");
+                throw new InvalidOperationException("La gestion du crÃ©dit est dÃ©sactivÃ©e dans la configuration LOGICA.");
             var card = request.Payments.Any(payment => payment.Kind == CheckoutPaymentKind.Card);
             var mixed = request.Payments.Count == 2;
 
@@ -91,6 +93,7 @@ namespace LOGICA.Infrastructure.Checkout
             }
 
             var manualDiscount = request.IsReturn ? null : readManualDiscount?.Invoke();
+            var freePrices = request.IsReturn ? null : readFreePrices?.Invoke();
             string cashier = AuthenticateCashier(request.CashierId, connection, transaction, readPin);
             MariaDbCashCheckoutServices.ValidateManualDiscountForPosting(manualDiscount, cashier,
                 workstation, request.Lines, connection, transaction);
@@ -98,7 +101,7 @@ namespace LOGICA.Infrastructure.Checkout
             var customer = credit && !request.IsReturn ? MariaDbCashCheckoutServices.ReadCreditCustomer(connection, transaction, request.Customer.Id)
                 : new CreditCustomer("0", "0", "", "");
             if (credit && !request.IsReturn && (customer.Id != request.Customer.Id || customer.Code != request.Customer.Code || customer.Name != request.Customer.Name))
-                throw new InvalidOperationException("Le client a changé. Revoyez la vente à crédit.");
+                throw new InvalidOperationException("Le client a changÃ©. Revoyez la vente Ã  crÃ©dit.");
 
             // Lock the same original sequence and basket used by the writers.
             // Reject an unsupported sequence layout rather than advance other counters.
@@ -131,17 +134,17 @@ namespace LOGICA.Infrastructure.Checkout
                 if (authoritative.Rows.Count != 1)
                     throw new InvalidOperationException("Requested article is unavailable.");
                 var article = authoritative.Rows[0];
-                var pricing = ReadSaleLinePrice(article, line.Quantity, manualDiscount?.PercentageFor(line.ArticleId));
+                var pricing = ReadSaleLinePrice(article, line.Quantity, manualDiscount?.PercentageFor(line.ArticleId), freePrices is not null && freePrices.TryGetValue(line.ArticleId, out var fpLine) ? fpLine : null);
                 decimal unit = pricing.UnitPrice;
                 decimal net = pricing.Amount;
                 if (waiting is not null && (waiting[line.ArticleId].Price != unit || waiting[line.ArticleId].Net != net ||
                     waiting[line.ArticleId].Discount != pricing.DiscountPercent))
-                    throw new InvalidOperationException("Le prix du panier en attente a changé.");
+                    throw new InvalidOperationException("Le prix du panier en attente a changÃ©.");
                 using (var write = connection.CreateCommand())
                 {
                     write.Transaction = transaction;
                     write.CommandText = "INSERT INTO TABLE_" + workstation +
-                        " (ID_ARTICLE,Code,Article,Famille,PRIX_A,PRIX_MP,PRIX_V,Qté,Remise,TOTAL_NET,TAUX_TVA,GROUPE)" +
+                        " (ID_ARTICLE,Code,Article,Famille,PRIX_A,PRIX_MP,PRIX_V,QtÃ©,Remise,TOTAL_NET,TAUX_TVA,GROUPE)" +
                         " VALUES (@id,@code,@article,@family,@cost,@mean,@price,@quantity,@discount,@net,@tax,@group)";
                     write.Parameters.AddWithValue("@id", line.ArticleId);
                     write.Parameters.AddWithValue("@code", article["Code"]);
@@ -160,7 +163,7 @@ namespace LOGICA.Infrastructure.Checkout
                 }
             }
             var basket = Read(connection, transaction,
-                "SELECT ID_ARTICLE,Code,Article,Famille,PRIX_A,PRIX_MP,PRIX_V,Qté AS trusted_quantity,Remise,TOTAL_NET,TAUX_TVA,GROUPE FROM TABLE_" +
+                "SELECT ID_ARTICLE,Code,Article,Famille,PRIX_A,PRIX_MP,PRIX_V,QtÃ© AS trusted_quantity,Remise,TOTAL_NET,TAUX_TVA,GROUPE FROM TABLE_" +
                 workstation + " ORDER BY ID_ARTICLE FOR UPDATE");
             if (basket.Rows.Count != request.Lines.Count)
                 throw new InvalidOperationException("Authoritative basket changed.");
@@ -179,7 +182,7 @@ namespace LOGICA.Infrastructure.Checkout
                 if (articles.Rows.Count != 1)
                     throw new InvalidOperationException("Article identity is no longer unique.");
                 var article = articles.Rows[0];
-                var pricing = ReadSaleLinePrice(article, quantity, manualDiscount?.PercentageFor(id));
+                var pricing = ReadSaleLinePrice(article, quantity, manualDiscount?.PercentageFor(id), freePrices is not null && freePrices.TryGetValue(id, out var fpVerify) ? fpVerify : null);
                 if (Number(row, "Remise") != pricing.DiscountPercent)
                     throw new InvalidOperationException("Authoritative catalogue discount changed.");
                 decimal price = pricing.UnitPrice;
@@ -211,7 +214,7 @@ namespace LOGICA.Infrastructure.Checkout
             if (card && !mixed && tendered != total)
                 throw new InvalidOperationException("Card amount must equal the authoritative total.");
             if (credit && tendered != total)
-                throw new InvalidOperationException("Le crédit doit correspondre exactement au net du ticket.");
+                throw new InvalidOperationException("Le crÃ©dit doit correspondre exactement au net du ticket.");
             if (total <= 0m || request.ExpectedTotal != total || tendered < total ||
                 decimal.Round(tendered, 2, MidpointRounding.AwayFromZero) != tendered)
                 throw new InvalidOperationException("Cash tender must cover the authoritative total in whole cents.");
@@ -258,7 +261,7 @@ namespace LOGICA.Infrastructure.Checkout
                 // Physical printing is a separate post-commit/peripheral gate.
                 Print = () => {
                     if (credit && !MariaDbCashCheckoutServices.IsCreditSaleEnabled(creditConfigurationDirectory))
-                        throw new InvalidOperationException("La configuration crédit a changé avant l’enregistrement.");
+                        throw new InvalidOperationException("La configuration crÃ©dit a changÃ© avant lâ€™enregistrement.");
                     var receipt = Read(connection, transaction,
                         "SELECT Total_NET FROM TABLE_VENTES_ENTETE WHERE ID_TICKET=@id", ("@id", idTicket));
                     var payments = Read(connection, transaction,
@@ -303,7 +306,7 @@ namespace LOGICA.Infrastructure.Checkout
             // They are copied into the signed return journal without using current
             // prices or mutable UI data.
             var original = Read(connection, transaction,
-                "SELECT ID_ARTICLE,Code,Article,Famille,PRIX_A,PRIX_MP,PRIX_V,Remise,Qté AS quantity," +
+                "SELECT ID_ARTICLE,Code,Article,Famille,PRIX_A,PRIX_MP,PRIX_V,Remise,QtÃ© AS quantity," +
                 "Total_NET AS line_amount,TAUX_TVA,GROUPE,OPERATION FROM TABLE_VENTES_JOURNAL " +
                 "WHERE BINARY ID_TICKET=BINARY @original AND BINARY OPERATION=BINARY @originalOperation " +
                 "ORDER BY BINARY ID_ARTICLE FOR UPDATE",
@@ -357,7 +360,7 @@ namespace LOGICA.Infrastructure.Checkout
                 {
                     command.Transaction = transaction;
                     command.CommandText = "INSERT INTO TABLE_" + workstation +
-                        " (ID_ARTICLE,Code,Article,Famille,PRIX_A,PRIX_MP,PRIX_V,Qté,Remise,TOTAL_NET,TAUX_TVA,GROUPE) " +
+                        " (ID_ARTICLE,Code,Article,Famille,PRIX_A,PRIX_MP,PRIX_V,QtÃ©,Remise,TOTAL_NET,TAUX_TVA,GROUPE) " +
                         "SELECT ID_ARTICLE,Code,Article,Famille,PRIX_A,PRIX_MP,PRIX_V,-@quantity,Remise,-@amount,TAUX_TVA,GROUPE " +
                         "FROM TABLE_VENTES_JOURNAL WHERE BINARY ID_TICKET=BINARY @original AND BINARY ID_ARTICLE=BINARY @article AND BINARY OPERATION=BINARY 'VENTE'";
                     command.Parameters.AddWithValue("@original", request.OriginalTicketId);
@@ -370,8 +373,8 @@ namespace LOGICA.Infrastructure.Checkout
             {
                 command.Transaction = transaction;
                 command.CommandText = "INSERT INTO TABLE_" + workstation +
-                    " (ID_ARTICLE,Code,Article,Famille,PRIX_A,PRIX_MP,PRIX_V,Qté,Remise,TOTAL_NET,TAUX_TVA,GROUPE) " +
-                    "SELECT ID_ARTICLE,Code,Article,Famille,PRIX_A,PRIX_MP,PRIX_V,-Qté,Remise,-Total_NET,TAUX_TVA,GROUPE " +
+                    " (ID_ARTICLE,Code,Article,Famille,PRIX_A,PRIX_MP,PRIX_V,QtÃ©,Remise,TOTAL_NET,TAUX_TVA,GROUPE) " +
+                    "SELECT ID_ARTICLE,Code,Article,Famille,PRIX_A,PRIX_MP,PRIX_V,-QtÃ©,Remise,-Total_NET,TAUX_TVA,GROUPE " +
                     "FROM TABLE_VENTES_JOURNAL WHERE BINARY ID_TICKET=BINARY @original " +
                     "AND BINARY OPERATION=BINARY @originalOperation ORDER BY BINARY ID_ARTICLE";
                 command.Parameters.AddWithValue("@original", request.OriginalTicketId);
@@ -381,7 +384,7 @@ namespace LOGICA.Infrastructure.Checkout
             }
 
             var staged = Read(connection, transaction,
-                "SELECT ID_ARTICLE,Code,Article,Famille,PRIX_A,PRIX_MP,PRIX_V,Remise,Qté AS quantity," +
+                "SELECT ID_ARTICLE,Code,Article,Famille,PRIX_A,PRIX_MP,PRIX_V,Remise,QtÃ© AS quantity," +
                 "TOTAL_NET AS line_amount,TAUX_TVA,GROUPE FROM TABLE_" + workstation +
                 " ORDER BY BINARY ID_ARTICLE FOR UPDATE");
             if (staged.Rows.Count != original.Rows.Count)
@@ -413,7 +416,7 @@ namespace LOGICA.Infrastructure.Checkout
             string negativeAmount = (-amount).ToString(CultureInfo.CurrentCulture);
             var context = new TicketPaymentContext { TicketId = idTicket, TicketNumber = ticket,
                 SaleDate = date, Cashier = cashier, ClientId = customer.Id, ClientCode = customer.Code, ClientName = customer.Name,
-                Workstation = workstation, Operation = returnOperation, Remark = request.OriginalTicketId + (card ? " | CARTE confirmé extérieurement" : "") };
+                Workstation = workstation, Operation = returnOperation, Remark = request.OriginalTicketId + (card ? " | CARTE confirmÃ© extÃ©rieurement" : "") };
             return new CheckoutPostingInput
             {
                 ReadStock = () => stock,
@@ -436,7 +439,7 @@ namespace LOGICA.Infrastructure.Checkout
                         ("@id", idTicket));
                     var detail = Read(connection, transaction,
                         "SELECT ID_ARTICLE,Code,Article,Famille,GROUPE,PRIX_A,PRIX_MP,PRIX_V,Remise," +
-                        "Qté AS quantity,Total_NET AS line_amount,TAUX_TVA,OPERATION,ID_CLIENT,CODE_CLIENT,CLIENT FROM TABLE_VENTES_JOURNAL " +
+                        "QtÃ© AS quantity,Total_NET AS line_amount,TAUX_TVA,OPERATION,ID_CLIENT,CODE_CLIENT,CLIENT FROM TABLE_VENTES_JOURNAL " +
                         "WHERE BINARY ID_TICKET=BINARY @id ORDER BY BINARY ID_ARTICLE",
                         ("@id", idTicket));
                     if (receipt.Rows.Count != 1 || payment.Rows.Count != (credit ? 0 : 1) ||
@@ -510,7 +513,7 @@ namespace LOGICA.Infrastructure.Checkout
                 "SELECT VALEUR FROM TABLE_PARAMETRES WHERE BINARY OBJET=BINARY 'FENETRE_MODE_P' FOR UPDATE");
             if (configuration.Rows.Count != 1 ||
                 !bool.TryParse(Convert.ToString(configuration.Rows[0][0]), out var enabled) || !enabled)
-                throw new UnauthorizedAccessException("Les modes de paiement sont désactivés.");
+                throw new UnauthorizedAccessException("Les modes de paiement sont dÃ©sactivÃ©s.");
             var modes = Read(connection, transaction,
                 "SELECT MODE_P FROM TABLE_MODE_P WHERE BINARY MODE_P=BINARY 'CARTE' FOR UPDATE");
             if (modes.Rows.Count != 1)
@@ -526,7 +529,7 @@ namespace LOGICA.Infrastructure.Checkout
             if (string.IsNullOrWhiteSpace(pin) || pin.Length > 256)
                 throw new UnauthorizedAccessException("Cashier authentication failed.");
             var users = Read(connection, transaction,
-                "SELECT ListUser AS trusted_cashier, Catégorie AS trusted_role FROM TABLE_PASS WHERE BINARY ListPass=BINARY @pin AND BINARY ListUser=BINARY @cashier FOR UPDATE",
+                "SELECT ListUser AS trusted_cashier, CatÃ©gorie AS trusted_role FROM TABLE_PASS WHERE BINARY ListPass=BINARY @pin AND BINARY ListUser=BINARY @cashier FOR UPDATE",
                 ("@pin", pin.Trim()), ("@cashier", cashierId));
             pin = null; // Never retain or log a credential in the posting input.
             if (users.Rows.Count != 1 ||
@@ -546,7 +549,7 @@ namespace LOGICA.Infrastructure.Checkout
         internal sealed record CashSaleLine(string ArticleId, string ArticleName, int Quantity, decimal UnitPrice, decimal Amount, decimal DiscountPercent);
 
         internal static IReadOnlyList<CashSaleLine> ReadCashSaleLines(IReadOnlyList<CheckoutBatchLine> lines,
-            MySqlConnection connection, MySqlTransaction transaction, ApprovedManualDiscount approval = null)
+            MySqlConnection connection, MySqlTransaction transaction, ApprovedManualDiscount approval = null, IReadOnlyDictionary<string, decimal>? freePrices = null)
         {
             if (lines == null || lines.Any(x => x == null ||
                 string.IsNullOrWhiteSpace(x.ArticleId) || x.Quantity <= 0) ||
@@ -561,7 +564,8 @@ namespace LOGICA.Infrastructure.Checkout
                 if (article.Rows.Count != 1)
                     throw new InvalidOperationException("Requested article is unavailable.");
                 var row = article.Rows[0];
-                var pricing = ReadSaleLinePrice(row, line.Quantity, approval?.PercentageFor(line.ArticleId));
+                decimal? fpRead = freePrices is not null && freePrices.TryGetValue(line.ArticleId, out var fpVal) ? fpVal : null;
+                var pricing = ReadSaleLinePrice(row, line.Quantity, approval?.PercentageFor(line.ArticleId), fpRead);
                 result.Add(new CashSaleLine(line.ArticleId, Convert.ToString(row["Article"]) ?? line.ArticleId,
                     line.Quantity, pricing.UnitPrice, pricing.Amount, pricing.DiscountPercent));
             }
@@ -572,7 +576,7 @@ namespace LOGICA.Infrastructure.Checkout
 
         // Form_3_VENTE quantity editing reuses these exact LOGICA domain rules.
         // Catalogue promotion is a percentage, not a new promotion/date engine.
-        private static SaleLinePrice ReadSaleLinePrice(DataRow article, int quantity, decimal? manualPercentage = null)
+        private static SaleLinePrice ReadSaleLinePrice(DataRow article, int quantity, decimal? manualPercentage = null, decimal? freePrice = null)
         {
             decimal standard = Number(article, "PRIX_V_1");
             decimal tier = OptionalNumber(article, "PRIX_QTE");
@@ -583,7 +587,7 @@ namespace LOGICA.Infrastructure.Checkout
             decimal minimum = legacy.Val(tier) > 0.0 ? Number(article, "PRIX_QTE_MIN") : 0m;
             if (minimum < 0m)
                 throw new InvalidOperationException("Authoritative quantity-price threshold is invalid.");
-            decimal unit = SalesLinePricing.SelectQuantityPrice(quantity, minimum, tier, standard, legacy) ?? standard;
+            decimal unit = freePrice ?? (SalesLinePricing.SelectQuantityPrice(quantity, minimum, tier, standard, legacy) ?? standard);
             if (unit < 0m) throw new InvalidOperationException("Authoritative selected price is invalid.");
             decimal net = Math.Round(SalesLinePricing.CalculateNetAmount(unit, quantity, discount),
                 2, MidpointRounding.ToEven);
@@ -600,10 +604,10 @@ namespace LOGICA.Infrastructure.Checkout
                 throw new InvalidOperationException("Les ventes en attente exigent une table transactionnelle.");
 
             var rows = Read(connection, transaction,
-                "SELECT ID_ARTICLE, Qté AS waiting_quantity, PRIX_V, TOTAL_NET, Remise, ID_CLIENT FROM TABLE_ATTENTE WHERE V=@id FOR UPDATE",
+                "SELECT ID_ARTICLE, QtÃ© AS waiting_quantity, PRIX_V, TOTAL_NET, Remise, ID_CLIENT FROM TABLE_ATTENTE WHERE V=@id FOR UPDATE",
                 ("@id", id));
             if (rows.Rows.Count != request.Lines.Count)
-                throw new InvalidOperationException("La vente en attente est indisponible ou a changé.");
+                throw new InvalidOperationException("La vente en attente est indisponible ou a changÃ©.");
             var result = new Dictionary<string, (decimal Price, decimal Net, decimal Discount)>(StringComparer.Ordinal);
             foreach (DataRow row in rows.Rows)
             {
@@ -619,7 +623,7 @@ namespace LOGICA.Infrastructure.Checkout
             using var consume = new MySqlCommand("DELETE FROM TABLE_ATTENTE WHERE V=@id", connection, transaction);
             consume.Parameters.AddWithValue("@id", id);
             if (consume.ExecuteNonQuery() != rows.Rows.Count)
-                throw new InvalidOperationException("La vente en attente a déjà été reprise.");
+                throw new InvalidOperationException("La vente en attente a dÃ©jÃ  Ã©tÃ© reprise.");
             return result;
         }
 
@@ -655,3 +659,4 @@ namespace LOGICA.Infrastructure.Checkout
         }
     }
 }
+
