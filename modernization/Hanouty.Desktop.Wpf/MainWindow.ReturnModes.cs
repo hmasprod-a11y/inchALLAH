@@ -35,4 +35,31 @@ public partial class MainWindow
         try { ReturnPaymentMode.SelectedIndex = _returnPaymentMode == "Cash" ? 0 : _returnPaymentMode == "Credit" ? 1 : _returnPaymentMode == "Card" ? 2 : 3; }
         finally { _settingReturnMode = false; }
     }
+
+    private Func<bool>? _independentReturn;
+    public void ConfigureIndependentReturn(Func<bool> independentReturn)
+    {
+        _independentReturn = independentReturn;
+    }
+
+    public bool ExecuteIndependentReturn()
+    {
+        if (_businessDocumentsOpen || _customerFilesOpen || _manualDiscountOpen || _cashierEntryOpen || _alternatePaymentOpen || _reviewOpen || _logoutOpen || _pinOpen || _originalSaleLookupBusy ||
+            DataContext is not CatalogueViewModel { FinancialSessionActive: true, CheckoutBusy: false, CheckoutUncertain: false, PendingOperationId: null }) return false;
+        _businessDocumentsOpen = true;
+        try
+        {
+            return _independentReturn?.Invoke() ?? SetReturnPaymentMode("Cash");
+        }
+        finally
+        {
+            _businessDocumentsOpen = false;
+            RefreshTrustedBasketTotal();
+        }
+    }
+
+    private void IndependentReturn_Click(object sender, RoutedEventArgs args)
+    {
+        ExecuteIndependentReturn();
+    }
 }

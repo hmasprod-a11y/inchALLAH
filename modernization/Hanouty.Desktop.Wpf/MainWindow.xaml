@@ -100,6 +100,8 @@
                                  AutomationProperties.Name="Search original receipt identity"/>
                         <Button Content="Rechercher le ticket" Click="SearchOriginalSales_Click"
                                 MinHeight="40" Margin="0,6,0,6"/>
+                        <Button Content="Retour indépendant" Click="IndependentReturn_Click"
+                                MinHeight="40" Margin="0,0,0,6" AutomationProperties.Name="Independent return"/>
                         <ListBox x:Name="OriginalSaleResults" SelectionChanged="OriginalSaleResults_SelectionChanged" DisplayMemberPath="ReceiptLabel"
                                  Height="80" AutomationProperties.Name="Persisted original sale results"/>
                         <Button Content="Vérifier le ticket sélectionné" Click="SelectOriginalSale_Click"
@@ -238,6 +240,9 @@
                                 <Button x:Name="ManualDiscountButton" Content="Remise" Click="ManualDiscount_Click"
                                         Visibility="Collapsed" MinHeight="36" Margin="8,0,0,0" Padding="10,3"
                                         AutomationProperties.Name="Review manual discount"/>
+                                <Button Content="Prix libre" Click="EditBasketPrice_Click"
+                                        MinHeight="36" Margin="8,0,0,0" Padding="10,3"
+                                        AutomationProperties.Name="Prix libre PRIX_LIBRE"/>
                                 <TextBlock Text="{Binding SelectedItem.ArticleName, ElementName=CashierBasket, TargetNullValue=''}"
                                            MaxWidth="80" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" Margin="8,0,0,0"/>
                                 <Button Content="Vider" Click="ClearBasket_Click" MinHeight="36" Margin="8,0,0,0" Padding="10,3" AutomationProperties.Name="Vider le panier"/>
@@ -317,9 +322,11 @@
                             </DockPanel>
                             <Button Content="Actualiser le total du panier" Visibility="Collapsed" Click="RefreshTrustedBasketTotal_Click"
                                     AutomationProperties.Name="Read trusted basket total"/>
-                            <UniformGrid Columns="3" Margin="0,4,0,0">
+                            <UniformGrid Columns="4" Margin="0,4,0,0">
                                 <Button Content="Espèces" Click="EnterTender_Click" MinHeight="44" FontSize="15"
                                         IsEnabled="{Binding FinancialSessionActive}" AutomationProperties.Name="Enter sale cash tender"/>
+                                <Button Content="Pavé" Click="NumericKeypad_Click" MinHeight="44" FontSize="15"
+                                        IsEnabled="{Binding FinancialSessionActive}" AutomationProperties.Name="Numeric keypad change tender"/>
                                 <Button Content="CARTE" Click="PayByCard_Click" MinHeight="44" FontSize="15"
                                         IsEnabled="{Binding FinancialSessionActive}" AutomationProperties.Name="Pay sale by card"/>
                                 <Button Content="Mixte" Click="PayMixed_Click" MinHeight="44" FontSize="15"
