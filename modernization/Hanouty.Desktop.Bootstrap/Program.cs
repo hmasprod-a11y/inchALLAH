@@ -35,7 +35,7 @@ public static class Program
                 {
                     settings = CatalogueSettings.FromEnvironment();
                 }
-                else
+                else if (File.Exists(WorkstationConfiguration.DefaultPath))
                 {
                     settings = WorkstationConfiguration.Load(WorkstationConfiguration.DefaultPath);
                 }
