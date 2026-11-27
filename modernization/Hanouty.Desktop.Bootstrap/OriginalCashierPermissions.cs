@@ -28,5 +28,20 @@ internal static class OriginalCashierPermissions
             return Convert.ToInt32(command.ExecuteScalar())==1;
         }finally{pin="";}
     }
-}
 
+    internal static bool AuthorizePermission(Func<MySqlConnection> connections, string actor, string requiredRole, Func<string, string> approval)
+    {
+        if (string.IsNullOrWhiteSpace(actor) || string.IsNullOrWhiteSpace(requiredRole)) return false;
+        var role = requiredRole.Trim().ToUpperInvariant();
+        if (role is not ("ADMIN" or "MANAGER")) return false;
+        var pin = approval(role);
+        if (string.IsNullOrWhiteSpace(pin)) return false;
+        try
+        {
+            using var db = connections(); db.Open();
+            using var cmd = new MySqlCommand("SELECT COUNT(*) FROM TABLE_PASS WHERE BINARY ListUser=BINARY @actor AND BINARY Catégorie IN ('ADMIN','MANAGER') AND EXISTS (SELECT 1 FROM TABLE_PASS approver WHERE BINARY approver.Catégorie=BINARY @role AND BINARY approver.ListPass=BINARY @pin)", db);
+            cmd.Parameters.AddWithValue("@actor", actor); cmd.Parameters.AddWithValue("@role", role); cmd.Parameters.AddWithValue("@pin", pin);
+            return Convert.ToInt32(cmd.ExecuteScalar()) == 1;
+        } finally { pin = ""; }
+    }
+}
