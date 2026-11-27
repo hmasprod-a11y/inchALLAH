@@ -7,6 +7,47 @@ public partial class MainWindow
     private Action<bool>? _openSalesJournal;
     private Action? _openWorkstationSettings;
     private Action? _openDailyStock;
+    private Action? _openCompterCaisse;
+    private Action? _openCloture;
+
+    public void ConfigureCompterCaisse(Action open) => _openCompterCaisse = open;
+    public void ConfigureCloture(Action open) => _openCloture = open;
+
+    public bool ShowCompterCaisse()
+    {
+        if (!VerifyTablePass(TablePassRole.Supervisor, "Comptage de Caisse")) return false;
+        if (_businessDocumentsOpen || _customerFilesOpen || _manualDiscountOpen || _alternatePaymentOpen ||
+            _cashierEntryOpen || _reviewOpen || _logoutOpen || _pinOpen || _originalSaleLookupBusy ||
+            DataContext is not CatalogueViewModel { FinancialSessionActive: true, CheckoutBusy: false, CheckoutUncertain: false, PendingOperationId: null }) return false;
+        _businessDocumentsOpen = true;
+        try
+        {
+            if (_openCompterCaisse is not null) _openCompterCaisse();
+            else MessageBox.Show("Module de comptage de caisse (Compter Caisse) ouvert.", "Caisse", MessageBoxButton.OK, MessageBoxImage.Information);
+            return true;
+        }
+        finally { _businessDocumentsOpen = false; RefreshTrustedBasketTotal(); }
+    }
+
+    public bool ShowCloture()
+    {
+        if (!VerifyTablePass(TablePassRole.Manager, "Clôture de Caisse")) return false;
+        if (_businessDocumentsOpen || _customerFilesOpen || _manualDiscountOpen || _alternatePaymentOpen ||
+            _cashierEntryOpen || _reviewOpen || _logoutOpen || _pinOpen || _originalSaleLookupBusy ||
+            DataContext is not CatalogueViewModel { FinancialSessionActive: true, CheckoutBusy: false, CheckoutUncertain: false, PendingOperationId: null }) return false;
+        _businessDocumentsOpen = true;
+        try
+        {
+            if (_openCloture is not null) _openCloture();
+            else MessageBox.Show("Module de clôture de caisse (Clôture) ouvert.", "Clôture", MessageBoxButton.OK, MessageBoxImage.Information);
+            return true;
+        }
+        finally { _businessDocumentsOpen = false; RefreshTrustedBasketTotal(); }
+    }
+
+    private void CompterCaisse_Click(object sender, RoutedEventArgs args) => ShowCompterCaisse();
+    private void Cloture_Click(object sender, RoutedEventArgs args) => ShowCloture();
+
     public void ConfigureDailyStock(Action open) => _openDailyStock = open;
     public bool ShowDailyStock()
     {
@@ -47,3 +88,4 @@ public partial class MainWindow
         finally { _businessDocumentsOpen = false; RefreshTrustedBasketTotal(); }
     }
 }
+
