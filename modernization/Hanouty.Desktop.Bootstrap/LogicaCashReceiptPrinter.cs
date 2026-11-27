@@ -1,4 +1,4 @@
-using System.Drawing;
+﻿using System.Drawing;
 using System.Drawing.Printing;
 using System.Globalization;
 using LOGICA.ApplicationLayer.Checkout;
@@ -13,14 +13,14 @@ internal static class LogicaCashReceiptPrinter
     internal static void Print(MySqlConnection connection, string directory, string operation, string cashier, string register)
     {
         var settings = LogicaReceiptSettings.Read(connection, directory)
-            ?? throw new InvalidOperationException("Configuration du ticket LOGICA incomplète.");
+            ?? throw new InvalidOperationException("Configuration du ticket LOGICA incomplÃ¨te.");
         if (settings.Printer == "0") return;
         var ticket = LogicaPostedTicket.Read(connection, operation, cashier, register)
-            ?? throw new InvalidOperationException("Ticket enregistré introuvable.");
+            ?? throw new InvalidOperationException("Ticket enregistrÃ© introuvable.");
         var route = ReceiptPrintRouting.Select(settings.Printer, true, ticket.Operation,
             settings.Connection, settings.Template, out var copies);
         if (route is not (ReceiptPrintRoute.FrenchThreeColumn or ReceiptPrintRoute.Return))
-            throw new InvalidOperationException("Ce modèle ou branchement LOGICA reste à raccorder.");
+            throw new InvalidOperationException("Ce modÃ¨le ou branchement LOGICA reste Ã  raccorder.");
 
         using var command = connection.CreateCommand();
         command.CommandText = """
@@ -34,11 +34,11 @@ internal static class LogicaCashReceiptPrinter
 
         bool Flag(string name) => options.TryGetValue(name, out var value)
             ? Microsoft.VisualBasic.CompilerServices.Conversions.ToBoolean(value)
-            : throw new InvalidOperationException("Paramètre LOGICA manquant : " + name);
+            : throw new InvalidOperationException("ParamÃ¨tre LOGICA manquant : " + name);
         var isReturn = route == ReceiptPrintRoute.Return;
         using var qr = isReturn || Flag("AFFICHER_CODE_BARRE") ? LogicaReceiptQr.Create(operation) : null;
         if (!options.TryGetValue("PIED_TICKET", out var footer))
-            throw new InvalidOperationException("Paramètre LOGICA manquant : PIED_TICKET.");
+            throw new InvalidOperationException("ParamÃ¨tre LOGICA manquant : PIED_TICKET.");
 
         static string Amount(decimal amount) => amount.ToString("0.00", CultureInfo.CurrentCulture);
         var lines = ticket.FormatFrenchThreeColumnLines(
@@ -58,3 +58,4 @@ internal static class LogicaCashReceiptPrinter
         document.Print();
     }
 }
+
