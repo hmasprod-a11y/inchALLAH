@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using Hanouty.ArchitectureBridge;
 
@@ -79,11 +79,15 @@ public sealed class AuthorizedWpfCheckoutAdapter : IContextualCheckoutSubmission
             request.Payments[0].Kind != tender || request.Payments[0].Amount != context.TenderedAmount)
             return CheckoutSubmissionResult.Invalidated;
         request.Validate();
-        return _gate.Commit(request) switch
+        try
         {
-            FinancialCommitOutcome.Committed or FinancialCommitOutcome.AlreadyCommitted => CheckoutSubmissionResult.Committed,
-            _ => CheckoutSubmissionResult.Unknown
-        };
+            return _gate.Commit(request) switch
+            {
+                FinancialCommitOutcome.Committed or FinancialCommitOutcome.AlreadyCommitted => CheckoutSubmissionResult.Committed,
+                _ => CheckoutSubmissionResult.Unknown
+            };
+        }
+        catch (UnauthorizedAccessException) { return CheckoutSubmissionResult.Invalidated; }
     }
 
 
@@ -128,6 +132,7 @@ public sealed class AuthorizedWpfCheckoutAdapter : IContextualCheckoutSubmission
                 _ => CheckoutSubmissionResult.Unknown
             };
         }
+        catch (UnauthorizedAccessException) { return CheckoutSubmissionResult.Invalidated; }
         catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
         { return CheckoutSubmissionResult.Unknown; }
     }
@@ -151,3 +156,4 @@ public sealed class AuthorizedWpfCheckoutAdapter : IContextualCheckoutSubmission
         { return CheckoutResolution.Unknown; }
     }
 }
+
